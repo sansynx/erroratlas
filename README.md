@@ -2,7 +2,7 @@
 
 ErrorAtlas is hosted debugging memory for coding agents.
 
-Developers do not clone this repo, create Supabase projects, deploy Workers, or manage ErrorAtlas infrastructure. They install the npm MCP client, generate one hosted MCP key, run Supermemory locally, and let their coding agent search and publish verified fixes.
+Install the ErrorAtlas MCP client, generate one hosted MCP key, run Supermemory locally, and let your coding agent search or publish verified fixes without losing debugging context.
 
 ## Working flow
 
