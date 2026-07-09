@@ -1,5 +1,17 @@
 import { buildPlaybookMarkdown, errorSignature, redactText, titleFromError } from "../shared/redaction";
-import { faviconSvg } from "./assets";
+import { faviconSvg, sequencePngBase64 } from "./assets";
+
+function base64ToArrayBuffer(value: string): ArrayBuffer {
+  const binary = atob(value);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return buffer;
+}
 import { encryptSensitivePayload } from "./crypto";
 import { clampLimit, handleError, html, json, options, randomToken, readJson, sha256Hex, text } from "./http";
 import { configured, requireScope, resolveActor, supabaseRest } from "./supabase";
@@ -34,9 +46,17 @@ export default {
         return html(renderLandingUi(env));
       }
 
-      if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/public/favicon.svg")) {
-        return text(faviconSvg, 200, "image/svg+xml; charset=utf-8");
-      }
+    if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/public/favicon.svg")) {
+      return text(faviconSvg, 200, "image/svg+xml; charset=utf-8");
+    }
+    if (request.method === "GET" && (url.pathname === "/sequence.png" || url.pathname === "/public/sequence.png")) {
+      return new Response(base64ToArrayBuffer(sequencePngBase64), {
+        headers: {
+          "cache-control": "public, max-age=86400",
+          "content-type": "image/png",
+        },
+      });
+    }
 
       if (request.method === "GET" && url.pathname === "/setup") {
         return html(renderSetupGuideUi(env, url.origin));

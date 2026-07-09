@@ -1,6 +1,6 @@
 {
   "name": "@sansynx/erroratlas",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": false,
   "type": "module",
   "description": "Hosted ErrorAtlas MCP client and local debugging memory tools for coding agents.",
@@ -27,7 +27,6 @@
     "deploy": "wrangler deploy",
     "build": "npm run sync:assets && tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "npm run build && node scripts/e2e-smoke.mjs",
     "prepack": "npm run build",
     "mcp": "tsx src/mcp/server.ts",
     "cli": "tsx src/cli/index.ts"

@@ -4,6 +4,21 @@ ErrorAtlas is hosted debugging memory for coding agents.
 
 Developers do not clone this repo, create Supabase projects, deploy Workers, or manage ErrorAtlas infrastructure. They install the npm MCP client, generate one hosted MCP key, run Supermemory locally, and let their coding agent search and publish verified fixes.
 
+## Working flow
+
+<p align="center">
+  <img src="https://erroratlas.sansynx.workers.dev/public/sequence.png" alt="ErrorAtlas working flow" width="100%">
+</p>
+
+```txt
+1. Developer signs in at the hosted dashboard.
+2. Dashboard generates one MCP key.
+3. Developer installs @sansynx/erroratlas in their project.
+4. Coding agent connects to the local ErrorAtlas MCP server.
+5. MCP searches Supermemory local plus hosted ErrorAtlas fixes.
+6. After a verified fix, MCP stores sanitized incidents and playbooks remotely.
+```
+
 ## End-user flow
 
 1. Open the hosted dashboard:
