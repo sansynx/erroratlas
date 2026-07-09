@@ -1,0 +1,7 @@
+﻿{
+  "apiUrl": "https://erroratlas.your-workers-subdomain.workers.dev",
+  "agentKeyEnv": "ERRORATLAS_API_KEY",
+  "supermemoryUrl": "http://localhost:6767",
+  "supermemoryKeyEnv": "SUPERMEMORY_API_KEY",
+  "defaultVisibility": "team"
+}

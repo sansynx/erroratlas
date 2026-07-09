@@ -1,0 +1,6 @@
+APP_NAME=ErrorAtlas
+APP_ORIGIN=http://localhost:8787
+PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+PUBLIC_SUPABASE_ANON_KEY=your-public-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+FIELD_ENCRYPTION_KEY=generate-a-32-byte-base64url-key
