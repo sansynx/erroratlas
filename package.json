@@ -1,6 +1,6 @@
 {
   "name": "@sansynx/erroratlas",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": false,
   "type": "module",
   "description": "Hosted ErrorAtlas MCP client and local debugging memory tools for coding agents.",
@@ -48,5 +48,13 @@
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "wrangler": "^4.24.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sansynx/erroratlas.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sansynx/erroratlas/issues"
+  },
+  "homepage": "https://github.com/sansynx/erroratlas#readme"
 }
