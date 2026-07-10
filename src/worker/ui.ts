@@ -1513,7 +1513,7 @@ npx erroratlas init</pre>
           <span class="step-number">3</span>
           <div>
             <h2>Run local memory</h2>
-            <p>Supermemory stores private debugging context on the developer machine. It needs one model-provider key such as <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>, or <code>GROQ_API_KEY</code>.</p>
+            <p>Supermemory stores private debugging context on the developer machine. It needs one model-provider key such as <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>, or <code>GROQ_API_KEY</code>. Read the official <a href="https://supermemory.ai/docs/quickstart" target="_blank" rel="noreferrer">Supermemory quickstart</a> if you need provider setup help.</p>
             <pre class="code">OPENAI_API_KEY=your_model_provider_key
 npx supermemory local --port 6767
 
@@ -2138,7 +2138,7 @@ ${sharedCss()}
   }
 
   function renderTopActions() {
-    if (!state.config || !state.config.supabaseUrl || !state.config.supabaseAnonKey) {
+    if (!state.config.supabaseUrl || !state.config.supabaseAnonKey) {
       actions.innerHTML = '<a class="button primary" href="/setup">Setup guide</a>';
       return;
     }
@@ -2150,6 +2150,13 @@ ${sharedCss()}
   }
 
   function render() {
+    if (!state.config) {
+      title.textContent = "Loading ErrorAtlas";
+      status.textContent = "Preparing your workspace";
+      content.innerHTML = '<div class="panel loader-card"><div><div class="dots"><span></span><span></span><span></span></div><h3>Loading workspace</h3><p class="muted">Checking your secure session and workspace configuration.</p></div></div>';
+      return;
+    }
+
     if (!state.config || !state.config.supabaseUrl || !state.config.supabaseAnonKey) {
       renderSetupMissing();
       return;
