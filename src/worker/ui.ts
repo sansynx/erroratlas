@@ -1534,7 +1534,6 @@ npx supermemory local --port 6767
 # if installed globally
 supermemory local --port 6767</pre>
             <p>Keep this terminal running while your coding agent works. Local memories are stored in the project's <code>.supermemory</code> folder.</p>
-            <p>Need help with the model provider or Supermemory itself? Read the official <a href="https://supermemory.ai/docs/quickstart" target="_blank" rel="noreferrer">Supermemory quickstart</a>.</p>
             <p>Windows note: if the npm wrapper says the server binary was not found, open bash or WSL in the project and run <code>PORT=6767 ~/.supermemory/bin/supermemory-server</code> after exporting your model-provider key.</p>
           </div>
         </article>
