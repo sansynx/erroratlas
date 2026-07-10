@@ -1086,16 +1086,19 @@ ${sharedCss()}
     gap: 14px;
     padding: clamp(52px, 8vw, 80px) 0 clamp(40px, 6vw, 60px);
   }
-  .eyebrow {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
     color: var(--body);
     font-size: 12px;
     letter-spacing: 0.08em;
-    text-transform: uppercase;
-    height: 24px;
-  }
+  text-transform: uppercase;
+  height: 24px;
+}
+.landing-page .eyebrow {
+  color: var(--red-700);
+}
   .hero-copy {
     max-width: 720px;
     margin: 16px auto 0;
@@ -1380,6 +1383,17 @@ ${sharedCss()}
     margin: 0 0 14px;
     color: var(--body);
     max-width: 700px;
+  }
+  .step p a {
+    color: var(--blue-700);
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--blue-700) 55%, transparent);
+    text-underline-offset: 3px;
+  }
+  .step p a:hover {
+    color: var(--blue-800);
+    text-decoration-color: currentColor;
   }
   .step .code {
     margin-top: 10px;
