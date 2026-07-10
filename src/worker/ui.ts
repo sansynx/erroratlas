@@ -1496,7 +1496,7 @@ ${sharedCss()}
           <span class="step-number">1</span>
           <div>
             <h2>Generate your MCP secret</h2>
-            <p>Open the hosted dashboard, sign in, click <strong>Generate secret</strong>, then copy it immediately. Existing raw secrets cannot be recovered later.</p>
+            <p>Open the hosted dashboard, sign in, click <strong>Generate secret</strong>, then copy it immediately. This secret authenticates every MCP request. Existing raw secrets cannot be recovered later.</p>
             <pre class="code">${origin}/dashboard</pre>
           </div>
         </article>
@@ -1520,6 +1520,7 @@ npx supermemory local --port 6767
 # if installed globally
 supermemory local --port 6767</pre>
             <p>Keep this terminal running while your coding agent works. Local memories are stored in the project's <code>.supermemory</code> folder.</p>
+            <p>Need help with the model provider or Supermemory itself? Read the official <a href="https://supermemory.ai/docs/quickstart" target="_blank" rel="noreferrer">Supermemory quickstart</a>.</p>
             <p>Windows note: if the npm wrapper says the server binary was not found, open bash or WSL in the project and run <code>PORT=6767 ~/.supermemory/bin/supermemory-server</code> after exporting your model-provider key.</p>
           </div>
         </article>
@@ -2529,12 +2530,11 @@ ErrorAtlas is a debugging memory layer for coding agents. Agents use the MCP ser
 - Supermemory local stores private project memory on the developer machine.
 - ErrorAtlas remote stores sanitized searchable incidents, playbooks, audit events, hashed keys, and encrypted payload snapshots.
 
-## Public Endpoints
+## Hosted Endpoints
 
 - ${origin}/setup
-- ${origin}/api/search
-- ${origin}/api/playbooks
 - ${origin}/llms.txt
+- ${origin}/api/search and ${origin}/api/playbooks require an active MCP key with playbooks:read.
 
 ## Beginner Setup
 
@@ -2551,6 +2551,8 @@ ErrorAtlas is a debugging memory layer for coding agents. Agents use the MCP ser
 
     OPENAI_API_KEY=your_model_provider_key
     npx supermemory local --port 6767
+
+Official help: https://supermemory.ai/docs/quickstart
 
 Windows/WSL note: if the npm wrapper installs the binary under bash home but cannot find it from Windows, start it from bash inside the project:
 
