@@ -45,7 +45,7 @@ const resolutionSchema = z.object({
   rootCause: longText,
   finalFix: longText,
   failedAttempts: z.array(z.string().max(2_000)).max(20).optional(),
-  verification: optionalLongText,
+  verification: longText,
   language: shortText.optional(),
   framework: shortText.optional(),
   packageManager: shortText.optional(),
@@ -381,46 +381,73 @@ async function createResolution(env: Env, request: Request, ctx: ExecutionContex
   if (actor) requireScope(actor, "resolutions:publish");
 
   const body = parseInput(resolutionSchema, await readJson<unknown>(request));
-  const title = titleFromError(body.error);
-  const signature = errorSignature(body.error);
+  const projectId = await authorizedProjectId(env, actor, body.projectId);
+  const error = redactText(body.error);
+  const rootCause = redactText(body.rootCause);
+  const finalFix = redactText(body.finalFix);
+  const verification = redactText(body.verification);
+  const failedAttempts = body.failedAttempts?.map(redactText);
+  const language = body.language ? redactText(body.language) : null;
+  const framework = body.framework ? redactText(body.framework) : null;
+  const packageManager = body.packageManager ? redactText(body.packageManager) : null;
+  const title = titleFromError(error);
+  const signature = errorSignature(error);
   const playbookInput: Parameters<typeof buildPlaybookMarkdown>[0] = {
     title,
-    error: body.error,
-    rootCause: body.rootCause,
-    finalFix: body.finalFix
+    error,
+    rootCause,
+    finalFix
   };
-  if (body.failedAttempts) playbookInput.failedAttempts = body.failedAttempts;
-  if (body.verification) playbookInput.verification = body.verification;
-  if (body.framework) playbookInput.framework = body.framework;
-  if (body.language) playbookInput.language = body.language;
+  if (failedAttempts) playbookInput.failedAttempts = failedAttempts;
+  playbookInput.verification = verification;
+  if (framework) playbookInput.framework = framework;
+  if (language) playbookInput.language = language;
   if (body.risk) playbookInput.risk = body.risk;
   if (body.confidence) playbookInput.confidence = body.confidence;
   const playbookMd = buildPlaybookMarkdown(playbookInput);
 
-  const rows = await supabaseRest<Array<{ id: string }>>(env, "playbooks", {
+  const visibility = body.visibility || "public";
+  const errorFingerprint = await fingerprint(signature, language, framework, packageManager);
+  const environmentFingerprint = await fingerprint(language, framework, packageManager);
+  const solutionFingerprint = await fingerprint(rootCause, finalFix);
+  const idempotencyKey = await fingerprint(actor.kind, actor.kind === "agent" ? actor.keyId : actor.userId, errorFingerprint, environmentFingerprint, solutionFingerprint);
+  const rows = await supabaseRest<Array<GatekeeperResult>>(env, "rpc/gatekeep_resolution_submission", {
     method: "POST",
-    body: JSON.stringify([
-      {
-        org_id: actor.orgId,
-        project_id: await authorizedProjectId(env, actor, body.projectId),
-        approved_by: actor.kind === "human" ? actor.userId : null,
-        title,
-        error_signature: signature,
-        language: body.language ? redactText(body.language) : null,
-        framework: body.framework ? redactText(body.framework) : null,
-        package_manager: body.packageManager ? redactText(body.packageManager) : null,
-        root_cause: redactText(body.rootCause),
-        verification_command: body.verification ? redactText(body.verification) : null,
-        playbook_md: playbookMd,
-        risk: body.risk || "medium",
-        confidence: body.confidence || "medium",
-        visibility: body.visibility || "team"
-      }
-    ])
+    body: JSON.stringify({
+      p_org_id: actor.orgId,
+      p_project_id: projectId,
+      p_submitted_by: actor.kind === "human" ? actor.userId : null,
+      p_submitted_by_agent_key: actor.kind === "agent" ? actor.keyId : null,
+      p_title: title,
+      p_error_signature: signature,
+      p_error_fingerprint: errorFingerprint,
+      p_environment_fingerprint: environmentFingerprint,
+      p_solution_fingerprint: solutionFingerprint,
+      p_language: language,
+      p_framework: framework,
+      p_package_manager: packageManager,
+      p_root_cause: rootCause,
+      p_failed_attempts: failedAttempts || [],
+      p_final_fix: finalFix,
+      p_verification: verification,
+      p_playbook_md: playbookMd,
+      p_encrypted_payload: await encryptSensitivePayload(env, body),
+      p_risk: body.risk || "medium",
+      p_confidence: body.confidence || "medium",
+      p_visibility: visibility,
+      p_idempotency_key: idempotencyKey
+    })
   });
 
-  ctx.waitUntil(audit(env, actor, "resolution.published", "playbook", rows[0]?.id));
-  return json({ status: "published", playbookId: rows[0]?.id }, 201);
+  const result = rows[0];
+  if (!result) throw new HttpError(502, "gatekeeper_unavailable", "The resolution gatekeeper did not return a result.");
+  ctx.waitUntil(audit(env, actor, `resolution.${result.outcome}`, result.playbook_id ? "playbook" : "submission", result.playbook_id || result.submission_id));
+  return json({
+    status: result.outcome,
+    playbookId: result.playbook_id,
+    candidateId: result.submission_id,
+    confirmationCount: result.confirmation_count
+  }, result.outcome === "pending_confirmation" ? 202 : 201);
 }
 
 function rank(rows: Array<Record<string, unknown>>, query: string): Array<Record<string, unknown>> {
@@ -517,6 +544,20 @@ function parseInput<T extends z.ZodTypeAny>(schema: T, value: unknown): z.infer<
     throw new HttpError(400, "invalid_request", "Request fields are missing, invalid, or too large.");
   }
   return parsed.data;
+}
+
+interface GatekeeperResult {
+  outcome: "duplicate_evidence" | "promoted" | "pending_confirmation" | "workspace_published";
+  playbook_id: string | null;
+  submission_id: string;
+  confirmation_count: number;
+}
+
+async function fingerprint(...parts: Array<string | null | undefined>): Promise<string> {
+  const normalized = parts
+    .map((part) => redactText(part || "").toLowerCase().replace(/\s+/g, " ").trim())
+    .join("\u001f");
+  return sha256Hex(normalized);
 }
 
 function requireKeyManager(actor: Actor | null): asserts actor is HumanActor {

@@ -274,13 +274,232 @@ alter table public.incidents add column if not exists exit_code integer;
 alter table public.incidents add column if not exists dependency_versions jsonb not null default '{}';
 alter table public.incidents add column if not exists encrypted_context text;
 alter table public.playbook_submissions add column if not exists encrypted_payload text;
+alter table public.playbook_submissions add column if not exists error_fingerprint text;
+alter table public.playbook_submissions add column if not exists environment_fingerprint text;
+alter table public.playbook_submissions add column if not exists solution_fingerprint text;
+alter table public.playbook_submissions add column if not exists idempotency_key text;
+alter table public.playbook_submissions add column if not exists canonical_playbook_id uuid references public.playbooks(id) on delete set null;
+alter table public.playbook_submissions add column if not exists expires_at timestamptz;
 alter table public.playbooks add column if not exists approved_by uuid;
+alter table public.playbooks add column if not exists error_fingerprint text;
+alter table public.playbooks add column if not exists environment_fingerprint text;
+alter table public.playbooks add column if not exists solution_fingerprint text;
 alter table public.user_profiles add column if not exists display_name text;
 alter table public.user_profiles add column if not exists bio text;
 alter table public.user_profiles add column if not exists updated_at timestamptz not null default now();
 alter table public.agent_keys add column if not exists rotated_from uuid references public.agent_keys(id) on delete set null;
 alter table public.agent_keys add column if not exists revoked_by uuid;
 alter table public.agent_keys add column if not exists revoked_reason text;
+
+alter table public.playbook_submissions drop constraint if exists playbook_submissions_status_check;
+alter table public.playbook_submissions
+  add constraint playbook_submissions_status_check
+  check (status in ('pending', 'approved', 'rejected', 'private', 'merged'));
+
+create table if not exists public.playbook_evidence (
+  id uuid primary key default gen_random_uuid(),
+  playbook_id uuid not null references public.playbooks(id) on delete cascade,
+  org_id uuid not null references public.organizations(id) on delete cascade,
+  project_id uuid references public.projects(id) on delete set null,
+  submission_id uuid references public.playbook_submissions(id) on delete set null,
+  submitted_by uuid,
+  submitted_by_agent_key uuid references public.agent_keys(id) on delete set null,
+  outcome text not null check (outcome in ('verified', 'duplicate')),
+  verification text not null,
+  created_at timestamptz not null default now(),
+  unique (submission_id)
+);
+
+create unique index if not exists idx_submissions_org_idempotency
+  on public.playbook_submissions (org_id, idempotency_key)
+  where idempotency_key is not null;
+create index if not exists idx_submissions_gatekeeper
+  on public.playbook_submissions (visibility, error_fingerprint, environment_fingerprint, solution_fingerprint, created_at desc)
+  where status = 'pending';
+create index if not exists idx_playbooks_gatekeeper
+  on public.playbooks (visibility, error_fingerprint, environment_fingerprint, solution_fingerprint);
+create index if not exists idx_playbook_evidence_playbook
+  on public.playbook_evidence (playbook_id, created_at desc);
+
+create or replace function public.gatekeep_resolution_submission(
+  p_org_id uuid,
+  p_project_id uuid,
+  p_submitted_by uuid,
+  p_submitted_by_agent_key uuid,
+  p_title text,
+  p_error_signature text,
+  p_error_fingerprint text,
+  p_environment_fingerprint text,
+  p_solution_fingerprint text,
+  p_language text,
+  p_framework text,
+  p_package_manager text,
+  p_root_cause text,
+  p_failed_attempts jsonb,
+  p_final_fix text,
+  p_verification text,
+  p_playbook_md text,
+  p_encrypted_payload text,
+  p_risk text,
+  p_confidence text,
+  p_visibility text,
+  p_idempotency_key text
+)
+returns table(outcome text, playbook_id uuid, submission_id uuid, confirmation_count integer)
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_submission public.playbook_submissions%rowtype;
+  v_candidate public.playbook_submissions%rowtype;
+  v_playbook public.playbooks%rowtype;
+  v_existing_playbook_id uuid;
+  v_scope text;
+begin
+  if p_visibility not in ('private', 'team', 'public') then
+    raise exception using errcode = '22023', message = 'unsupported visibility';
+  end if;
+
+  v_scope := case when p_visibility = 'public' then 'public' else p_org_id::text end;
+  perform pg_advisory_xact_lock(hashtextextended(
+    v_scope || ':' || p_error_fingerprint || ':' || p_environment_fingerprint || ':' || p_solution_fingerprint,
+    0
+  ));
+
+  select * into v_submission
+  from public.playbook_submissions
+  where org_id = p_org_id and idempotency_key = p_idempotency_key;
+  if found then
+    return query select
+      case
+        when v_submission.canonical_playbook_id is null then 'pending_confirmation'
+        when v_submission.status = 'merged' then 'duplicate_evidence'
+        when v_submission.visibility = 'public' then 'promoted'
+        else 'workspace_published'
+      end,
+      v_submission.canonical_playbook_id,
+      v_submission.id,
+      case when v_submission.visibility = 'public' then 2 else 1 end;
+    return;
+  end if;
+
+  select * into v_playbook
+  from public.playbooks
+  where error_fingerprint = p_error_fingerprint
+    and environment_fingerprint = p_environment_fingerprint
+    and solution_fingerprint = p_solution_fingerprint
+    and (
+      (p_visibility = 'public' and visibility = 'public')
+      or (p_visibility <> 'public' and org_id = p_org_id and visibility = p_visibility)
+    )
+  order by created_at asc
+  limit 1;
+  v_existing_playbook_id := v_playbook.id;
+
+  insert into public.playbook_submissions (
+    org_id, project_id, submitted_by, submitted_by_agent_key, title, error_signature,
+    error_fingerprint, environment_fingerprint, solution_fingerprint,
+    language, framework, package_manager, root_cause, failed_attempts, final_fix,
+    verification_command, playbook_md, encrypted_payload, risk, confidence, status,
+    visibility, idempotency_key, expires_at
+  ) values (
+    p_org_id, p_project_id, p_submitted_by, p_submitted_by_agent_key, p_title, p_error_signature,
+    p_error_fingerprint, p_environment_fingerprint, p_solution_fingerprint,
+    p_language, p_framework, p_package_manager, p_root_cause, coalesce(p_failed_attempts, '[]'::jsonb), p_final_fix,
+    p_verification, p_playbook_md, p_encrypted_payload, p_risk, p_confidence, 'pending',
+    p_visibility, p_idempotency_key, now() + interval '30 days'
+  ) returning * into v_submission;
+
+  if v_existing_playbook_id is not null then
+    update public.playbook_submissions
+    set status = 'merged', canonical_playbook_id = v_playbook.id
+    where id = v_submission.id;
+    insert into public.playbook_evidence (
+      playbook_id, org_id, project_id, submission_id, submitted_by, submitted_by_agent_key, outcome, verification
+    ) values (
+      v_playbook.id, p_org_id, p_project_id, v_submission.id, p_submitted_by, p_submitted_by_agent_key, 'duplicate', p_verification
+    );
+    update public.playbooks
+    set worked_count = worked_count + 1, updated_at = now()
+    where id = v_playbook.id;
+    return query select 'duplicate_evidence', v_playbook.id, v_submission.id, 2;
+    return;
+  end if;
+
+  if p_visibility <> 'public' then
+    insert into public.playbooks (
+      org_id, project_id, source_submission_id, approved_by, title, error_signature,
+      error_fingerprint, environment_fingerprint, solution_fingerprint,
+      language, framework, package_manager, root_cause, playbook_md, verification_command,
+      risk, confidence, visibility, worked_count
+    ) values (
+      p_org_id, p_project_id, v_submission.id, p_submitted_by, p_title, p_error_signature,
+      p_error_fingerprint, p_environment_fingerprint, p_solution_fingerprint,
+      p_language, p_framework, p_package_manager, p_root_cause, p_playbook_md, p_verification,
+      p_risk, p_confidence, p_visibility, 1
+    ) returning * into v_playbook;
+    update public.playbook_submissions
+    set status = case when p_visibility = 'private' then 'private' else 'approved' end,
+        canonical_playbook_id = v_playbook.id,
+        reviewed_at = now()
+    where id = v_submission.id;
+    insert into public.playbook_evidence (
+      playbook_id, org_id, project_id, submission_id, submitted_by, submitted_by_agent_key, outcome, verification
+    ) values (
+      v_playbook.id, p_org_id, p_project_id, v_submission.id, p_submitted_by, p_submitted_by_agent_key, 'verified', p_verification
+    );
+    return query select 'workspace_published', v_playbook.id, v_submission.id, 1;
+    return;
+  end if;
+
+  select * into v_candidate
+  from public.playbook_submissions
+  where visibility = 'public'
+    and status = 'pending'
+    and expires_at > now()
+    and id <> v_submission.id
+    and error_fingerprint = p_error_fingerprint
+    and environment_fingerprint = p_environment_fingerprint
+    and solution_fingerprint = p_solution_fingerprint
+    and (
+      submitted_by_agent_key is distinct from p_submitted_by_agent_key
+      or submitted_by is distinct from p_submitted_by
+      or project_id is distinct from p_project_id
+    )
+  order by created_at asc
+  limit 1;
+
+  if not found then
+    return query select 'pending_confirmation', null::uuid, v_submission.id, 1;
+    return;
+  end if;
+
+  insert into public.playbooks (
+    org_id, project_id, source_submission_id, approved_by, title, error_signature,
+    error_fingerprint, environment_fingerprint, solution_fingerprint,
+    language, framework, package_manager, root_cause, playbook_md, verification_command,
+    risk, confidence, visibility, worked_count
+  ) values (
+    v_candidate.org_id, v_candidate.project_id, v_candidate.id, v_candidate.submitted_by, v_candidate.title, v_candidate.error_signature,
+    v_candidate.error_fingerprint, v_candidate.environment_fingerprint, v_candidate.solution_fingerprint,
+    v_candidate.language, v_candidate.framework, v_candidate.package_manager, v_candidate.root_cause, v_candidate.playbook_md, v_candidate.verification_command,
+    v_candidate.risk, v_candidate.confidence, 'public', 2
+  ) returning * into v_playbook;
+
+  update public.playbook_submissions
+  set status = 'approved', canonical_playbook_id = v_playbook.id, reviewed_at = now()
+  where id in (v_candidate.id, v_submission.id);
+  insert into public.playbook_evidence (
+    playbook_id, org_id, project_id, submission_id, submitted_by, submitted_by_agent_key, outcome, verification
+  ) values
+    (v_playbook.id, v_candidate.org_id, v_candidate.project_id, v_candidate.id, v_candidate.submitted_by, v_candidate.submitted_by_agent_key, 'verified', v_candidate.verification_command),
+    (v_playbook.id, p_org_id, p_project_id, v_submission.id, p_submitted_by, p_submitted_by_agent_key, 'verified', p_verification);
+  return query select 'promoted', v_playbook.id, v_submission.id, 2;
+end;
+$$;
+
+revoke all on function public.gatekeep_resolution_submission(uuid, uuid, uuid, uuid, text, text, text, text, text, text, text, text, text, jsonb, text, text, text, text, text, text, text, text) from public;
+grant execute on function public.gatekeep_resolution_submission(uuid, uuid, uuid, uuid, text, text, text, text, text, text, text, text, text, jsonb, text, text, text, text, text, text, text, text) to service_role;
 
 update public.agent_keys as agent_key
 set
@@ -361,6 +580,11 @@ create trigger playbooks_project_organization
 before insert or update of project_id, org_id on public.playbooks
 for each row execute function public.enforce_project_organization();
 
+drop trigger if exists playbook_evidence_project_organization on public.playbook_evidence;
+create trigger playbook_evidence_project_organization
+before insert or update of project_id, org_id on public.playbook_evidence
+for each row execute function public.enforce_project_organization();
+
 alter table public.organizations enable row level security;
 alter table public.organization_members enable row level security;
 alter table public.user_profiles enable row level security;
@@ -370,5 +594,6 @@ alter table public.incidents enable row level security;
 alter table public.playbook_submissions enable row level security;
 alter table public.playbooks enable row level security;
 alter table public.playbook_votes enable row level security;
+alter table public.playbook_evidence enable row level security;
 alter table public.audit_events enable row level security;
 alter table public.contribution_days enable row level security;

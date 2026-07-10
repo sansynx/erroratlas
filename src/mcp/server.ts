@@ -97,7 +97,7 @@ server.tool(
     rootCause: requiredText,
     finalFix: requiredText,
     failedAttempts: attemptedFixes,
-    verification: optionalText,
+    verification: requiredText,
     language: shortText,
     framework: shortText,
     packageManager: shortText,
@@ -129,7 +129,7 @@ server.tool(
     });
     const remote = await callApi("/api/resolutions", {
       ...input,
-      visibility: input.visibility || config.defaultVisibility || "team"
+      visibility: input.visibility || config.defaultVisibility || "public"
     });
     return respond({ memory, remote, playbook });
   }

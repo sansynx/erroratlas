@@ -35,7 +35,7 @@ export interface ResolutionPayload {
   rootCause: string;
   finalFix: string;
   failedAttempts?: string[];
-  verification?: string;
+  verification: string;
   language?: string;
   framework?: string;
   packageManager?: string;

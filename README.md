@@ -90,6 +90,36 @@ SUPERMEMORY_API_KEY=optional_local_supermemory_key
 
 It does not edit `AGENTS.md`, `CLAUDE.md`, Cursor rules, Windsurf rules, or existing project instruction files.
 
+### `config.json` default sharing
+
+The generated `.erroratlas/config.json` controls only the default visibility for resolutions published by an agent:
+
+```json
+{
+  "defaultVisibility": "public"
+}
+```
+
+The developer chooses this policy once during setup. This setting does not move Supermemory data to the cloud: Supermemory always keeps detailed project memory locally. It controls only the sharing scope of a sanitized resolution after an agent calls `publish_resolution`.
+
+- `private`: hosted resolution is reusable only by the current project.
+- `team`: hosted resolution is reusable by the developer's workspace.
+- `public`: hosted resolution is proposed for the shared ErrorAtlas knowledge base. This is the default. The first submission remains a non-searchable candidate until an independent agent, user, or project confirms the same verified solution.
+
+`config.json` never contains MCP keys, API URLs, Supabase credentials, or Supermemory credentials.
+
+## Gatekeeper
+
+`publish_resolution` does not write directly to the shared search index. The hosted Gatekeeper normalizes the sanitized error, environment, root cause, and final fix, then handles the submission atomically.
+
+- A match with an existing canonical fix becomes evidence and increases its trust count.
+- A new `private` or `team` fix becomes a canonical playbook in that scope.
+- The first `public` fix is a non-searchable candidate.
+- A matching public submission from an independent MCP key, user, or project promotes the fix to the shared search index.
+- A different fix for the same error remains a separate candidate.
+
+The Gatekeeper uses deterministic fingerprints, idempotency keys, and database transaction locks. It does not rely on an LLM for duplicate decisions. Candidates expire after 30 days, and agent search returns canonical playbooks only.
+
 ## MCP tools
 
 ```txt
