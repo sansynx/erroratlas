@@ -1,24 +1,59 @@
 import { buildPlaybookMarkdown, errorSignature, redactText, titleFromError } from "../shared/redaction";
-import { faviconSvg, sequencePngBase64 } from "./assets";
-
-function base64ToArrayBuffer(value: string): ArrayBuffer {
-  const binary = atob(value);
-  const buffer = new ArrayBuffer(binary.length);
-  const bytes = new Uint8Array(buffer);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return buffer;
-}
+import { z } from "zod";
 import { encryptSensitivePayload } from "./crypto";
-import { clampLimit, handleError, html, json, options, randomToken, readJson, sha256Hex, text } from "./http";
+import { clampLimit, handleError, html, HttpError, json, options, randomToken, readJson, sha256Hex, text } from "./http";
 import { configured, requireScope, resolveActor, supabaseRest } from "./supabase";
-import type { Actor, Env, ResolutionPayload, SearchPayload } from "./types";
+import type { Actor, Env, HumanActor } from "./types";
 import { renderDashboardUi, renderLandingUi, renderLlmsTxt, renderSetupGuideUi } from "./ui";
 
 const selectPlaybook = "id,org_id,approved_by,title,error_signature,language,framework,package_manager,root_cause,playbook_md,verification_command,risk,confidence,visibility,worked_count,failed_count,created_at";
+const uuid = z.string().uuid();
+const shortText = z.string().max(240);
+const longText = z.string().trim().min(1).max(12_000);
+const optionalLongText = z.string().max(12_000).optional();
+const dependencyVersions = z.record(z.string().max(120)).refine((value) => Object.keys(value).length <= 50);
+const searchSchema = z.object({
+  query: optionalLongText,
+  error: optionalLongText,
+  stack: optionalLongText,
+  language: shortText.optional(),
+  framework: shortText.optional(),
+  packageManager: shortText.optional(),
+  limit: z.number().int().min(1).max(20).optional()
+}).strict();
+const agentKeySchema = z.object({
+  projectId: uuid.optional(),
+  scopes: z.array(z.enum(["playbooks:read", "incidents:write", "resolutions:publish"])).max(3).optional()
+}).strict();
+const incidentSchema = z.object({
+  error: longText,
+  context: optionalLongText,
+  stack: optionalLongText,
+  attemptedFixes: z.array(z.string().max(2_000)).max(20).optional(),
+  command: z.string().max(500).optional(),
+  exitCode: z.number().int().optional(),
+  language: shortText.optional(),
+  framework: shortText.optional(),
+  packageManager: shortText.optional(),
+  dependencyVersions: dependencyVersions.optional(),
+  signalType: z.enum(["error", "failed_fix", "verification", "note"]).optional(),
+  visibility: z.enum(["private", "team", "public"]).optional(),
+  projectId: uuid.optional()
+}).strict();
+const resolutionSchema = z.object({
+  error: longText,
+  rootCause: longText,
+  finalFix: longText,
+  failedAttempts: z.array(z.string().max(2_000)).max(20).optional(),
+  verification: optionalLongText,
+  language: shortText.optional(),
+  framework: shortText.optional(),
+  packageManager: shortText.optional(),
+  visibility: z.enum(["private", "team", "public"]).optional(),
+  risk: z.enum(["low", "medium", "high"]).optional(),
+  confidence: z.enum(["low", "medium", "high"]).optional(),
+  projectId: uuid.optional()
+}).strict();
 
 const emptyDashboard = {
   agentKeys: [] as Array<Record<string, unknown>>
@@ -31,8 +66,12 @@ const missingSchemaDashboard = {
 };
 
 function isMissingSupabaseSchema(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /404|not found|Could not find the table|relation .* does not exist|schema cache/i.test(message);
+  return error instanceof HttpError && error.code === "storage_schema_missing";
+}
+
+async function serveAsset(env: Env, request: Request, pathname: string): Promise<Response> {
+  const assetUrl = new URL(pathname, request.url);
+  return env.ASSETS.fetch(new Request(assetUrl, request));
 }
 
 export default {
@@ -46,17 +85,12 @@ export default {
         return html(renderLandingUi(env));
       }
 
-    if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/public/favicon.svg")) {
-      return text(faviconSvg, 200, "image/svg+xml; charset=utf-8");
-    }
-    if (request.method === "GET" && (url.pathname === "/sequence.png" || url.pathname === "/public/sequence.png")) {
-      return new Response(base64ToArrayBuffer(sequencePngBase64), {
-        headers: {
-          "cache-control": "public, max-age=86400",
-          "content-type": "image/png",
-        },
-      });
-    }
+      if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/public/favicon.svg")) {
+        return await serveAsset(env, request, "/favicon.svg");
+      }
+      if (request.method === "GET" && (url.pathname === "/sequence.png" || url.pathname === "/public/sequence.png")) {
+        return await serveAsset(env, request, "/sequence.png");
+      }
 
       if (request.method === "GET" && url.pathname === "/setup") {
         return html(renderSetupGuideUi(env, url.origin));
@@ -81,10 +115,7 @@ export default {
           appName: env.APP_NAME || "ErrorAtlas",
           supabaseUrl: env.PUBLIC_SUPABASE_URL || "",
           supabaseAnonKey: env.PUBLIC_SUPABASE_ANON_KEY || "",
-          hasSupabaseUrl: Boolean(env.PUBLIC_SUPABASE_URL),
-          hasSupabaseAnonKey: Boolean(env.PUBLIC_SUPABASE_ANON_KEY),
-          hasSupabaseServiceRoleKey: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
-          hasFieldEncryptionKey: Boolean(env.FIELD_ENCRYPTION_KEY),
+          ready: missing.length === 0,
           missing
         });
       }
@@ -92,43 +123,41 @@ export default {
       if (request.method === "GET" && url.pathname === "/api/health") {
         return json({
           ok: true,
-          configured: configured(env),
-          encryptionConfigured: Boolean(env.FIELD_ENCRYPTION_KEY),
           service: "erroratlas"
         });
       }
 
       if (request.method === "GET" && url.pathname === "/api/dashboard") {
-        return getDashboard(env, request);
+        return await getDashboard(env, request);
       }
 
       if (request.method === "GET" && url.pathname === "/api/playbooks") {
-        return getPlaybooks(env, request);
+        return await getPlaybooks(env, request);
       }
 
       if (request.method === "GET" && url.pathname.startsWith("/api/playbooks/")) {
-        return getPlaybook(env, request, url.pathname.split("/").at(-1) || "");
+        return await getPlaybook(env, request, url.pathname.split("/").at(-1) || "");
       }
 
       if (request.method === "POST" && url.pathname === "/api/search") {
-        return search(env, request);
+        return await search(env, request);
       }
 
       if (request.method === "POST" && url.pathname === "/api/agent-keys") {
-        return createAgentKey(env, request, ctx);
+        return await createAgentKey(env, request, ctx);
       }
 
       if (request.method === "POST" && /^\/api\/agent-keys\/[^/]+\/rotate$/.test(url.pathname)) {
         const id = url.pathname.split("/")[3] || "";
-        return rotateAgentKey(env, request, ctx, id);
+        return await rotateAgentKey(env, request, ctx, id);
       }
 
       if (request.method === "POST" && url.pathname === "/api/incidents") {
-        return createIncident(env, request, ctx);
+        return await createIncident(env, request, ctx);
       }
 
       if (request.method === "POST" && url.pathname === "/api/resolutions") {
-        return createResolution(env, request, ctx);
+        return await createResolution(env, request, ctx);
       }
 
       return json({ error: "not_found" }, 404);
@@ -162,18 +191,21 @@ async function getDashboard(env: Env, request: Request): Promise<Response> {
 }
 
 async function getPlaybooks(env: Env, request: Request): Promise<Response> {
-  const actor = await resolveActor(env, request, false);
-  const query = actor
-    ? `playbooks?select=${selectPlaybook}&or=(visibility.eq.public,org_id.eq.${actor.orgId})&order=worked_count.desc&limit=50`
-    : `playbooks?select=${selectPlaybook}&visibility=eq.public&order=worked_count.desc&limit=50`;
+  const actor = await resolveActor(env, request);
+  if (!actor) throw new HttpError(401, "invalid_agent_key", "An active MCP key is required.");
+  requireScope(actor, "playbooks:read");
+  const query = `playbooks?select=${selectPlaybook}&or=(visibility.eq.public,org_id.eq.${actor.orgId})&order=worked_count.desc&limit=50`;
   const rows = configured(env) ? await supabaseRest<Array<Record<string, unknown>>>(env, query) : [];
   const playbooks = configured(env) ? await enrichPlaybookAuthors(env, rows) : [];
   return json({ playbooks });
 }
 
 async function getPlaybook(env: Env, request: Request, id: string): Promise<Response> {
-  const actor = await resolveActor(env, request, false);
-  const visibility = actor ? `or=(visibility.eq.public,org_id.eq.${actor.orgId})&` : "visibility=eq.public&";
+  const actor = await resolveActor(env, request);
+  if (!actor) throw new HttpError(401, "invalid_agent_key", "An active MCP key is required.");
+  requireScope(actor, "playbooks:read");
+  if (!uuid.safeParse(id).success) throw new HttpError(400, "invalid_playbook_id", "Playbook id must be a UUID.");
+  const visibility = `or=(visibility.eq.public,org_id.eq.${actor.orgId})&`;
   const rows = await supabaseRest<Array<Record<string, unknown>>>(
     env,
     `playbooks?select=${selectPlaybook}&${visibility}id=eq.${encodeURIComponent(id)}&limit=1`
@@ -183,10 +215,11 @@ async function getPlaybook(env: Env, request: Request, id: string): Promise<Resp
 }
 
 async function search(env: Env, request: Request): Promise<Response> {
-  const actor = await resolveActor(env, request, false);
-  if (actor) requireScope(actor, "playbooks:read");
+  const actor = await resolveActor(env, request);
+  if (!actor) throw new HttpError(401, "invalid_agent_key", "An active MCP key is required.");
+  requireScope(actor, "playbooks:read");
 
-  const payload = await readJson<SearchPayload>(request);
+  const payload = parseInput(searchSchema, await readJson<unknown>(request));
   const query = [payload.query, payload.error, payload.stack, payload.framework, payload.language, payload.packageManager]
     .filter(Boolean)
     .join(" ");
@@ -196,9 +229,7 @@ async function search(env: Env, request: Request): Promise<Response> {
     return json({ query: redactText(query), results: [] });
   }
 
-  const scopeFilter = actor
-    ? `or=(visibility.eq.public,org_id.eq.${actor.orgId})`
-    : "visibility=eq.public";
+  const scopeFilter = `or=(visibility.eq.public,org_id.eq.${actor.orgId})`;
   const rows = await supabaseRest<Array<Record<string, unknown>>>(
     env,
     `playbooks?select=${selectPlaybook}&${scopeFilter}&limit=100`
@@ -214,11 +245,12 @@ async function search(env: Env, request: Request): Promise<Response> {
 
 async function createAgentKey(env: Env, request: Request, ctx: ExecutionContext): Promise<Response> {
   const actor = await resolveActor(env, request);
-  if (!actor || actor.kind !== "human") return json({ error: "unauthorized", message: "Sign in before creating agent keys." }, 401);
-  const body = await readJson<Record<string, unknown>>(request);
+  requireKeyManager(actor);
+  const body = parseInput(agentKeySchema, await readJson<unknown>(request));
   const input: { projectId?: string; scopes?: string[] } = {};
-  if (typeof body?.projectId === "string" && body.projectId.trim()) input.projectId = body.projectId;
-  if (Array.isArray(body?.scopes)) input.scopes = body.scopes.filter((scope) => typeof scope === "string");
+  const projectId = await authorizedProjectId(env, actor, body.projectId);
+  if (projectId) input.projectId = projectId;
+  if (body.scopes) input.scopes = body.scopes;
   const result = await insertAgentKey(env, actor, input);
 
   ctx.waitUntil(audit(env, actor, "agent_key.created", "agent_key", result.id));
@@ -227,9 +259,7 @@ async function createAgentKey(env: Env, request: Request, ctx: ExecutionContext)
 
 async function rotateAgentKey(env: Env, request: Request, ctx: ExecutionContext, id: string): Promise<Response> {
   const actor = await resolveActor(env, request);
-  if (!actor || actor.kind !== "human") {
-    return json({ error: "unauthorized", message: "Sign in before rotating agent keys." }, 401);
-  }
+  requireKeyManager(actor);
 
   const rows = await supabaseRest<Array<{ id: string; name: string; project_id?: string; scopes: string[] }>>(
     env,
@@ -237,15 +267,6 @@ async function rotateAgentKey(env: Env, request: Request, ctx: ExecutionContext,
   );
   const current = rows[0];
   if (!current) return json({ error: "not_found", message: "Agent key was not found or already revoked." }, 404);
-
-  await supabaseRest(env, `agent_keys?id=eq.${encodeURIComponent(current.id)}&org_id=eq.${actor.orgId}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      revoked_at: new Date().toISOString(),
-      revoked_by: actor.userId,
-      revoked_reason: "rotated"
-    })
-  });
 
   const rotateInput: { projectId?: string; scopes?: string[]; rotatedFrom?: string } = {
     scopes: current.scopes,
@@ -261,7 +282,7 @@ async function rotateAgentKey(env: Env, request: Request, ctx: ExecutionContext,
 
 async function insertAgentKey(
   env: Env,
-  actor: Actor,
+  actor: HumanActor,
   input: { projectId?: string; scopes?: string[]; rotatedFrom?: string }
 ): Promise<{ key: string; id: string; name: string; keyPrefix: string; scopes: string[] }> {
   const key = randomToken("ea_live");
@@ -271,22 +292,18 @@ async function insertAgentKey(
   const scopes = requestedScopes.length ? requestedScopes : ["playbooks:read", "incidents:write", "resolutions:publish"];
   const name = `agent-${hash.slice(0, 8)}`;
 
-  await revokeActiveAgentKeys(env, actor, input.rotatedFrom ? "rotated" : "replaced");
-
-  const rows = await supabaseRest<Array<{ id: string }>>(env, "agent_keys", {
+  const rows = await supabaseRest<Array<{ id: string }>>(env, "rpc/replace_active_agent_key", {
     method: "POST",
-    body: JSON.stringify([
-      {
-        org_id: actor.orgId,
-        project_id: input.projectId || null,
-        created_by: actor.kind === "human" ? actor.userId : null,
-        name,
-        secret_hash: hash,
-        key_prefix: key.slice(0, 14),
-        rotated_from: input.rotatedFrom || null,
-        scopes
-      }
-    ])
+    body: JSON.stringify({
+      p_org_id: actor.orgId,
+      p_project_id: input.projectId || null,
+      p_created_by: actor.userId,
+      p_name: name,
+      p_secret_hash: hash,
+      p_key_prefix: key.slice(0, 14),
+      p_scopes: scopes,
+      p_rotated_from: input.rotatedFrom || null
+    })
   });
 
   const id = rows[0]?.id;
@@ -294,12 +311,12 @@ async function insertAgentKey(
   return { key, id, name, keyPrefix: key.slice(0, 14), scopes };
 }
 
-async function revokeActiveAgentKeys(env: Env, actor: Actor, reason: string): Promise<void> {
+async function revokeActiveAgentKeys(env: Env, actor: HumanActor, reason: string): Promise<void> {
   await supabaseRest(env, `agent_keys?org_id=eq.${actor.orgId}&revoked_at=is.null`, {
     method: "PATCH",
     body: JSON.stringify({
       revoked_at: new Date().toISOString(),
-      revoked_by: actor.kind === "human" ? actor.userId : null,
+      revoked_by: actor.userId,
       revoked_reason: reason
     })
   });
@@ -327,13 +344,9 @@ async function createIncident(env: Env, request: Request, ctx: ExecutionContext)
   if (!actor) return json({ error: "unauthorized", message: "Sign in or provide an agent key before recording incidents." }, 401);
   if (actor) requireScope(actor, "incidents:write");
 
-  const body = await readJson<Record<string, unknown>>(request);
-  const error = String(body.error || body.title || "Untitled incident");
-  const projectId = typeof body.projectId === "string" && body.projectId
-    ? body.projectId
-    : actor.kind === "agent"
-      ? actor.projectId || null
-      : null;
+  const body = parseInput(incidentSchema, await readJson<unknown>(request));
+  const error = body.error;
+  const projectId = await authorizedProjectId(env, actor, body.projectId);
   const rows = await supabaseRest<Array<{ id: string }>>(env, "incidents", {
     method: "POST",
     body: JSON.stringify([
@@ -344,16 +357,16 @@ async function createIncident(env: Env, request: Request, ctx: ExecutionContext)
         created_by_agent_key: actor.kind === "agent" ? actor.keyId : null,
         title: titleFromError(error),
         error_signature: errorSignature(error),
-        signal_type: safeSignalType(body.signalType),
+        signal_type: body.signalType || "error",
         language: body.language ? redactText(body.language) : null,
         framework: body.framework ? redactText(body.framework) : null,
         package_manager: body.packageManager ? redactText(body.packageManager) : null,
         command: body.command ? redactText(body.command).slice(0, 500) : null,
-        exit_code: safeInteger(body.exitCode),
+        exit_code: body.exitCode ?? null,
         dependency_versions: safeRecord(body.dependencyVersions),
         redacted_context: redactText(signalSummary(body)),
         encrypted_context: await encryptSensitivePayload(env, body),
-        visibility: safeVisibility(body.visibility)
+        visibility: body.visibility || "team"
       }
     ])
   });
@@ -367,7 +380,7 @@ async function createResolution(env: Env, request: Request, ctx: ExecutionContex
   if (!actor) return json({ error: "unauthorized", message: "Sign in or provide an agent key before publishing resolutions." }, 401);
   if (actor) requireScope(actor, "resolutions:publish");
 
-  const body = await readJson<ResolutionPayload>(request);
+  const body = parseInput(resolutionSchema, await readJson<unknown>(request));
   const title = titleFromError(body.error);
   const signature = errorSignature(body.error);
   const playbookInput: Parameters<typeof buildPlaybookMarkdown>[0] = {
@@ -389,7 +402,7 @@ async function createResolution(env: Env, request: Request, ctx: ExecutionContex
     body: JSON.stringify([
       {
         org_id: actor.orgId,
-        project_id: body.projectId || (actor.kind === "agent" ? actor.projectId : null),
+        project_id: await authorizedProjectId(env, actor, body.projectId),
         approved_by: actor.kind === "human" ? actor.userId : null,
         title,
         error_signature: signature,
@@ -474,21 +487,7 @@ async function enrichPlaybookAuthors(env: Env, rows: Array<Record<string, unknow
   });
 }
 
-function safeVisibility(value: unknown): "private" | "team" | "public" {
-  return value === "private" || value === "public" || value === "team" ? value : "team";
-}
-
-function safeSignalType(value: unknown): string {
-  return value === "failed_fix" || value === "verification" || value === "note" ? value : "error";
-}
-
-function safeInteger(value: unknown): number | null {
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed)) return null;
-  return Math.trunc(parsed);
-}
-
-function safeRecord(value: unknown): Record<string, string> {
+function safeRecord(value: Record<string, string> | undefined): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
@@ -510,6 +509,40 @@ function signalSummary(body: Record<string, unknown>): Record<string, unknown> {
     language: body.language,
     dependencyVersions: body.dependencyVersions
   };
+}
+
+function parseInput<T extends z.ZodTypeAny>(schema: T, value: unknown): z.infer<T> {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new HttpError(400, "invalid_request", "Request fields are missing, invalid, or too large.");
+  }
+  return parsed.data;
+}
+
+function requireKeyManager(actor: Actor | null): asserts actor is HumanActor {
+  if (!actor || actor.kind !== "human") {
+    throw new HttpError(401, "unauthorized", "Sign in before managing MCP keys.");
+  }
+  if (actor.role !== "owner" && actor.role !== "admin") {
+    throw new HttpError(403, "forbidden", "Only workspace owners and admins can manage MCP keys.");
+  }
+}
+
+async function authorizedProjectId(env: Env, actor: Actor, requested?: string): Promise<string | null> {
+  if (actor.kind === "agent" && actor.projectId) {
+    if (requested && requested !== actor.projectId) {
+      throw new HttpError(403, "project_scope_violation", "Agent key cannot access a different project.");
+    }
+    return actor.projectId;
+  }
+  if (!requested) return null;
+
+  const rows = await supabaseRest<Array<{ id: string }>>(
+    env,
+    `projects?select=id&id=eq.${encodeURIComponent(requested)}&org_id=eq.${actor.orgId}&limit=1`
+  );
+  if (!rows[0]) throw new HttpError(404, "project_not_found", "Project was not found in this workspace.");
+  return rows[0].id;
 }
 
 async function audit(env: Env, actor: Actor | null, eventName: string, targetType?: string, targetId?: string): Promise<void> {

@@ -29,7 +29,17 @@ export async function supabaseRest<T>(env: Env, path: string, init: RequestInit 
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new HttpError(response.status, "supabase_error", detail || "Supabase request failed.");
+    const schemaMissing = /Could not find the table|relation .* does not exist|schema cache/i.test(detail);
+    console.error(JSON.stringify({
+      message: "storage_request_failed",
+      status: response.status,
+      category: schemaMissing ? "schema_missing" : "upstream_error"
+    }));
+    throw new HttpError(
+      response.status >= 500 ? 503 : response.status,
+      schemaMissing ? "storage_schema_missing" : "storage_request_failed",
+      schemaMissing ? "Workspace storage is not initialized." : "Workspace storage rejected the request."
+    );
   }
 
   if (response.status === 204) return null as T;
@@ -47,6 +57,10 @@ interface UserProfile {
   username: string;
   display_name?: string | null;
   bio?: string | null;
+}
+
+function isConflict(error: unknown): error is HttpError {
+  return error instanceof HttpError && error.status === 409;
 }
 
 async function getSupabaseUser(env: Env, request: Request): Promise<SupabaseUser | null> {
@@ -69,7 +83,7 @@ async function getOrCreateHumanActor(env: Env, user: SupabaseUser): Promise<Huma
   const profile = await ensureUserProfile(env, user);
   const existing = await supabaseRest<Array<{ org_id: string; role: string }>>(
     env,
-    `organization_members?select=org_id,role&user_id=eq.${encodeURIComponent(user.id)}&limit=1`
+    `organization_members?select=org_id,role&user_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc&limit=1`
   );
 
   if (existing[0]) {
@@ -84,7 +98,7 @@ async function getOrCreateHumanActor(env: Env, user: SupabaseUser): Promise<Huma
     };
   }
 
-  const slug = `personal-${user.id.slice(0, 8)}`;
+  const slug = `personal-${user.id}`;
   const orgName = "Personal atlas";
   const orgId = await ensurePersonalOrg(env, slug, orgName);
 
@@ -117,7 +131,7 @@ async function ensurePersonalOrg(env: Env, slug: string, orgName: string): Promi
     if (!orgId) throw new HttpError(500, "org_create_failed", "Could not create workspace.");
     return orgId;
   } catch (error) {
-    if (!(error instanceof HttpError && /duplicate|unique|23505|409/i.test(error.message))) throw error;
+    if (!isConflict(error)) throw error;
     const existing = await supabaseRest<Array<{ id: string }>>(
       env,
       `organizations?select=id&slug=eq.${encodeURIComponent(slug)}&limit=1`
@@ -135,7 +149,7 @@ async function ensureDefaultProject(env: Env, orgId: string): Promise<void> {
       body: JSON.stringify([{ org_id: orgId, name: "Default", slug: "default", visibility: "team" }])
     });
   } catch (error) {
-    if (error instanceof HttpError && /duplicate|unique|23505|409/i.test(error.message)) return;
+    if (isConflict(error)) return;
     throw error;
   }
 }
@@ -165,7 +179,7 @@ async function ensureUserProfile(env: Env, user: SupabaseUser): Promise<UserProf
       });
       if (rows[0]) return rows[0];
     } catch (error) {
-      if (error instanceof HttpError && /duplicate|unique|23505/i.test(error.message)) continue;
+      if (isConflict(error)) continue;
       throw error;
     }
   }

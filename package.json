@@ -1,6 +1,6 @@
 {
   "name": "@sansynx/erroratlas",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "description": "Hosted ErrorAtlas MCP client and local debugging memory tools for coding agents.",
@@ -16,17 +16,18 @@
     "erroratlas-mcp": "dist/mcp/server.js"
   },
   "files": [
-    "dist",
+    "dist/cli",
+    "dist/mcp",
+    "dist/shared",
     "templates",
-    "public",
     "README.md"
   ],
   "scripts": {
-    "sync:assets": "node scripts/sync-assets.mjs",
-    "dev": "npm run sync:assets && wrangler dev",
+    "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "build": "npm run sync:assets && tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
+    "cf-types": "wrangler types src/worker/worker-configuration.d.ts",
     "prepack": "npm run build",
     "mcp": "tsx src/mcp/server.ts",
     "cli": "tsx src/cli/index.ts"
@@ -42,9 +43,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "latest",
     "@types/node": "^24.0.12",
-    "playwright": "^1.61.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "wrangler": "^4.24.0"
@@ -56,5 +55,6 @@
   "bugs": {
     "url": "https://github.com/sansynx/erroratlas/issues"
   },
-  "homepage": "https://github.com/sansynx/erroratlas#readme"
+  "homepage": "https://github.com/sansynx/erroratlas#readme",
+  "author": ""
 }

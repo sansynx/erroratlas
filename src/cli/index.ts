@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = process.cwd();
@@ -24,6 +24,8 @@ Commands:
 }
 
 function init(): void {
+  const outputRoot = join(root, ".erroratlas");
+  ensureSafeOutputRoot(outputRoot);
   const files = [
     [".erroratlas/config.json", template("config.json.example")],
     [".erroratlas/instructions.md", template("instructions.md")],
@@ -43,15 +45,33 @@ No existing agent instruction file was modified.`);
 }
 
 function template(name: string): string {
-  const projectTemplate = join(root, "templates", name);
   const packageTemplate = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates", name);
-
-  if (existsSync(projectTemplate)) return readFileSync(projectTemplate, "utf8");
   return readFileSync(packageTemplate, "utf8");
 }
 
 function writeIfMissing(path: string, body: string): void {
-  if (existsSync(path)) return;
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, body);
+  try {
+    writeFileSync(path, body, { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if (isNodeError(error) && error.code === "EEXIST") return;
+    throw error;
+  }
+}
+
+function ensureSafeOutputRoot(outputRoot: string): void {
+  if (existsSync(outputRoot) && lstatSync(outputRoot).isSymbolicLink()) {
+    throw new Error("Refusing to initialize through a symbolic .erroratlas directory.");
+  }
+  mkdirSync(outputRoot, { recursive: true });
+
+  const realProject = realpathSync(root);
+  const realOutput = realpathSync(outputRoot);
+  const fromProject = relative(realProject, realOutput);
+  if (fromProject.startsWith("..") || isAbsolute(fromProject)) {
+    throw new Error("Refusing to initialize outside the current project.");
+  }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }

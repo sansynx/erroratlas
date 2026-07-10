@@ -1,11 +1,4 @@
-export interface Env {
-  APP_NAME?: string;
-  APP_ORIGIN?: string;
-  PUBLIC_SUPABASE_URL?: string;
-  PUBLIC_SUPABASE_ANON_KEY?: string;
-  SUPABASE_SERVICE_ROLE_KEY?: string;
-  FIELD_ENCRYPTION_KEY?: string;
-}
+export interface Env extends Cloudflare.Env {}
 
 export interface HumanActor {
   kind: "human";

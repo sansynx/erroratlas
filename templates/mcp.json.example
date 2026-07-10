@@ -4,7 +4,7 @@
       "command": "npx",
       "args": ["-y", "--package", "@sansynx/erroratlas", "erroratlas", "mcp"],
       "env": {
-        "ERRORATLAS_API_URL": "https://erroratlas.your-workers-subdomain.workers.dev",
+        "ERRORATLAS_API_URL": "https://erroratlas.sansynx.workers.dev",
         "ERRORATLAS_API_KEY": "ea_live_replace_after_creating_agent_key",
         "SUPERMEMORY_URL": "http://localhost:6767",
         "SUPERMEMORY_API_KEY": "optional_local_supermemory_key"

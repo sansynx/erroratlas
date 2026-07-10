@@ -7,40 +7,52 @@ import { z } from "zod";
 import { buildPlaybookMarkdown, errorSignature, redactText, titleFromError } from "../shared/redaction.js";
 
 interface LocalConfig {
-  apiUrl?: string;
-  supermemoryUrl?: string;
   defaultVisibility?: "private" | "team" | "public";
 }
+
+const LocalConfigSchema = z.object({
+  defaultVisibility: z.enum(["private", "team", "public"]).optional()
+}).passthrough();
+
+const requiredText = z.string().trim().min(1).max(12_000);
+const optionalText = z.string().max(12_000).optional();
+const shortText = z.string().max(240).optional();
+const attemptedFixes = z.array(z.string().max(2_000)).max(20).optional();
+const dependencyVersions = z.record(z.string().max(120)).refine((value) => Object.keys(value).length <= 50, {
+  message: "dependencyVersions supports at most 50 entries"
+}).optional();
 
 function localConfig(): LocalConfig {
   const path = join(process.cwd(), ".erroratlas", "config.json");
   if (!existsSync(path)) return {};
-  return JSON.parse(readFileSync(path, "utf8")) as LocalConfig;
+  const parsed = LocalConfigSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+  if (!parsed.success) throw new Error(".erroratlas/config.json contains unsupported values.");
+  return parsed.data as LocalConfig;
 }
 
 const config = localConfig();
-const apiUrl = (process.env.ERRORATLAS_API_URL || config.apiUrl || "http://localhost:8787").replace(/\/$/, "");
+const apiUrl = trustedApiUrl(process.env.ERRORATLAS_API_URL || "https://erroratlas.sansynx.workers.dev");
 const agentKey = process.env.ERRORATLAS_API_KEY || "";
-const supermemoryUrl = (process.env.SUPERMEMORY_URL || config.supermemoryUrl || "http://localhost:6767").replace(/\/$/, "");
+const supermemoryUrl = localServiceUrl(process.env.SUPERMEMORY_URL || "http://localhost:6767");
 const supermemoryKey = process.env.SUPERMEMORY_API_KEY || "";
 
 const server = new McpServer({
   name: "erroratlas",
-  version: "0.1.0"
+  version: "0.2.0"
 });
 
 server.tool(
   "search_error",
   {
-    error: z.string(),
-    stack: z.string().optional(),
-    command: z.string().optional(),
+    error: requiredText,
+    stack: optionalText,
+    command: shortText,
     exitCode: z.number().optional(),
-    language: z.string().optional(),
-    framework: z.string().optional(),
-    packageManager: z.string().optional(),
-    dependencyVersions: z.record(z.string()).optional(),
-    limit: z.number().optional()
+    language: shortText,
+    framework: shortText,
+    packageManager: shortText,
+    dependencyVersions,
+    limit: z.number().int().min(1).max(20).optional()
   },
   async (input) => {
     const local = await searchSupermemory(input);
@@ -52,16 +64,16 @@ server.tool(
 server.tool(
   "capture_error_signal",
   {
-    error: z.string(),
-    context: z.string().optional(),
-    stack: z.string().optional(),
-    attemptedFixes: z.array(z.string()).optional(),
-    command: z.string().optional(),
+    error: requiredText,
+    context: optionalText,
+    stack: optionalText,
+    attemptedFixes,
+    command: shortText,
     exitCode: z.number().optional(),
-    language: z.string().optional(),
-    framework: z.string().optional(),
-    packageManager: z.string().optional(),
-    dependencyVersions: z.record(z.string()).optional(),
+    language: shortText,
+    framework: shortText,
+    packageManager: shortText,
+    dependencyVersions,
     signalType: z.enum(["error", "failed_fix", "verification", "note"]).optional(),
     visibility: z.enum(["private", "team", "public"]).optional()
   },
@@ -78,44 +90,17 @@ server.tool(
 );
 
 
-server.tool(
-  "record_incident",
-  {
-    error: z.string(),
-    context: z.string().optional(),
-    stack: z.string().optional(),
-    attemptedFixes: z.array(z.string()).optional(),
-    command: z.string().optional(),
-    exitCode: z.number().optional(),
-    language: z.string().optional(),
-    framework: z.string().optional(),
-    packageManager: z.string().optional(),
-    dependencyVersions: z.record(z.string()).optional(),
-    signalType: z.enum(["error", "failed_fix", "verification", "note"]).optional(),
-    visibility: z.enum(["private", "team", "public"]).optional()
-  },
-  async (input) => {
-    const memory = await writeSupermemory({
-      kind: "incident",
-      title: titleFromError(input.error),
-      error_signature: errorSignature(input.error),
-      ...input
-    });
-    const remote = await callApi("/api/incidents", input);
-    return respond({ memory, remote });
-  }
-);
 server.tool(
   "publish_resolution",
   {
-    error: z.string(),
-    rootCause: z.string(),
-    finalFix: z.string(),
-    failedAttempts: z.array(z.string()).optional(),
-    verification: z.string().optional(),
-    language: z.string().optional(),
-    framework: z.string().optional(),
-    packageManager: z.string().optional(),
+    error: requiredText,
+    rootCause: requiredText,
+    finalFix: requiredText,
+    failedAttempts: attemptedFixes,
+    verification: optionalText,
+    language: shortText,
+    framework: shortText,
+    packageManager: shortText,
     visibility: z.enum(["private", "team", "public"]).optional(),
     risk: z.enum(["low", "medium", "high"]).optional(),
     confidence: z.enum(["low", "medium", "high"]).optional()
@@ -157,9 +142,10 @@ server.tool(
   },
   async (input) => {
     const response = await fetch(`${apiUrl}/api/playbooks/${encodeURIComponent(input.id)}`, {
-      headers: authHeaders()
+      headers: authHeaders(),
+      redirect: "error"
     });
-    return respond(await response.json());
+    return respond(await safeJsonResponse(response, "ErrorAtlas playbook request"));
   }
 );
 
@@ -174,15 +160,10 @@ async function callApi(path: string, body: unknown): Promise<unknown> {
       ...authHeaders(),
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(sanitizeForRemote(body))
+    body: JSON.stringify(sanitizeForRemote(body)),
+    redirect: "error"
   });
-
-  const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { status: response.status, body: text };
-  }
+  return safeJsonResponse(response, "ErrorAtlas API request");
 }
 
 function authHeaders(): Record<string, string> {
@@ -195,10 +176,11 @@ async function searchSupermemory(input: unknown): Promise<unknown> {
     const response = await fetch(`${supermemoryUrl}/v3/search`, {
       method: "POST",
       headers: supermemoryHeaders(),
-      body: JSON.stringify({ q: query, limit: 5 })
+      body: JSON.stringify({ q: query, limit: 5 }),
+      redirect: "error"
     });
     if (!response.ok) return { skipped: true, status: response.status };
-    return response.json();
+    return safeJsonResponse(response, "Supermemory search");
   } catch (error) {
     return { skipped: true, reason: error instanceof Error ? error.message : String(error) };
   }
@@ -212,10 +194,11 @@ async function writeSupermemory(payload: unknown): Promise<unknown> {
       body: JSON.stringify({
         content: localMemoryContent(payload),
         metadata: { source: "erroratlas" }
-      })
+      }),
+      redirect: "error"
     });
     if (!response.ok) return { skipped: true, status: response.status };
-    return response.json();
+    return safeJsonResponse(response, "Supermemory write");
   } catch (error) {
     return { skipped: true, reason: error instanceof Error ? error.message : String(error) };
   }
@@ -251,6 +234,68 @@ function respond(value: unknown) {
       }
     ]
   };
+}
+
+function trustedApiUrl(value: string): string {
+  const url = parseUrl(value, "ERRORATLAS_API_URL");
+  const isLoopback = loopbackHost(url.hostname);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback)) {
+    throw new Error("ERRORATLAS_API_URL must use HTTPS, except for loopback development URLs.");
+  }
+  return url.origin + url.pathname.replace(/\/$/, "");
+}
+
+function localServiceUrl(value: string): string {
+  const url = parseUrl(value, "SUPERMEMORY_URL");
+  if (!loopbackHost(url.hostname) || !["http:", "https:"].includes(url.protocol)) {
+    throw new Error("SUPERMEMORY_URL must point to a local loopback service.");
+  }
+  return url.origin + url.pathname.replace(/\/$/, "");
+}
+
+function parseUrl(value: string, name: string): URL {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password || url.search || url.hash) throw new Error("unsupported URL components");
+    return url;
+  } catch {
+    throw new Error(`${name} must be a valid base URL without credentials, query, or fragment.`);
+  }
+}
+
+function loopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "host.docker.internal";
+}
+
+async function safeJsonResponse(response: Response, label: string): Promise<unknown> {
+  const text = await readBoundedText(response, 256 * 1024);
+  if (!response.ok) return { error: "request_failed", service: label, status: response.status };
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { error: "invalid_response", service: label, status: response.status };
+  }
+}
+
+async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
+  const declared = Number(response.headers.get("content-length") || "0");
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error("Upstream response exceeded the safe size limit.");
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  let text = "";
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error("Upstream response exceeded the safe size limit.");
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
 }
 
 await server.connect(new StdioServerTransport());

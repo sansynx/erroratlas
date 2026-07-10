@@ -7,7 +7,7 @@ Install the ErrorAtlas MCP client, generate one hosted MCP key, run Supermemory 
 ## Working flow
 
 <p align="center">
-  <img src="https://erroratlas.sansynx.workers.dev/public/sequence.png" alt="ErrorAtlas working flow" width="100%">
+  <img src="https://erroratlas.sansynx.workers.dev/sequence.png" alt="ErrorAtlas working flow" width="100%" height="auto">
 </p>
 
 ```txt
@@ -30,6 +30,8 @@ https://erroratlas.sansynx.workers.dev/dashboard
 2. Sign in and click `Generate secret`.
 
 Copy the MCP secret immediately. Existing raw secrets cannot be recovered later.
+
+Every MCP request must include this active secret. ErrorAtlas hashes it before lookup, rejects missing, invalid, or revoked keys with `401`, and enforces the key's allowed scopes before reading or writing any memory.
 
 3. Install ErrorAtlas in the project where the coding agent works:
 
@@ -93,7 +95,6 @@ It does not edit `AGENTS.md`, `CLAUDE.md`, Cursor rules, Windsurf rules, or exis
 ```txt
 erroratlas.search_error
 erroratlas.capture_error_signal
-erroratlas.record_incident
 erroratlas.publish_resolution
 erroratlas.get_playbook
 ```
@@ -103,4 +104,7 @@ erroratlas.get_playbook
 - Supermemory local stores private project memory on the developer machine.
 - ErrorAtlas remote stores sanitized searchable incidents and playbooks.
 - Agent keys are shown once and stored remotely only as hashes.
+- MCP search, capture, publication, and playbook reads require an active, scoped MCP key.
 - Sensitive incident payload snapshots are encrypted before database insert.
+- The npm client accepts hosted API overrides only from explicit environment configuration and requires Supermemory to stay on a loopback address.
+- Remote request fields are size-limited and redacted before persistence; keep full project context in local Supermemory.

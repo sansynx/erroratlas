@@ -20,7 +20,7 @@ function themeBootScript(): string {
   const root = document.documentElement;
   let stored = null;
   try { stored = localStorage.getItem(key); } catch (_error) {}
-  const initial = stored || "light";
+  const initial = stored || "dark";
   root.dataset.theme = initial;
   function apply(theme) {
     root.dataset.theme = theme;
@@ -40,6 +40,7 @@ function themeBootScript(): string {
       if (!nav || !menu) return;
       nav.classList.remove("open");
       menu.setAttribute("aria-expanded", "false");
+      menu.setAttribute("aria-label", "Open navigation");
     }
     apply(root.dataset.theme || initial);
     if (toggle) {
@@ -54,6 +55,7 @@ function themeBootScript(): string {
         const next = !nav.classList.contains("open");
         nav.classList.toggle("open", next);
         menu.setAttribute("aria-expanded", String(next));
+        menu.setAttribute("aria-label", next ? "Close navigation" : "Open navigation");
       });
       nav.addEventListener("click", (event) => {
         if (!(event.target instanceof HTMLElement)) return;
@@ -75,7 +77,7 @@ function themeBootScript(): string {
 
 function sharedCss(): string {
   return `<style>
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Poppins:wght@400;500;600;700&display=swap");
 
 :root {
   color-scheme: light;
@@ -176,7 +178,7 @@ function sharedCss(): string {
   --pink-800: #e4106e;
   --pink-900: #c41562;
   --pink-1000: #460523;
-  --font-sans: "Geist Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Poppins", ui-sans-serif, sans-serif;
   --font-mono: "Geist Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --easing-soft: cubic-bezier(0.175, 0.885, 0.32, 1.1);
   --radius-sm: 6px;
@@ -716,7 +718,7 @@ ul, ol { margin: 0; padding-left: 20px; color: var(--body); }
     overflow: hidden;
     pointer-events: none;
     transform: translateY(-4px);
-    transition: max-height 240ms ease, opacity 180ms ease, transform 220ms ease, margin 220ms ease, padding 220ms ease, border-color 180ms ease;
+    transition: none;
   }
   .nav-actions {
     display: flex;
@@ -793,6 +795,10 @@ ul, ol { margin: 0; padding-left: 20px; color: var(--body); }
   .nav-menu {
     box-shadow: none;
   }
+  .nav-links {
+    position: static;
+    inset: auto;
+  }
   .nav.open .nav-menu {
     background: var(--surface-2);
   }
@@ -838,18 +844,18 @@ ul, ol { margin: 0; padding-left: 20px; color: var(--body); }
 }
 
 .nav {
-  min-height: 64px;
-  margin-top: 18px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, transparent), color-mix(in srgb, var(--surface-2) 78%, transparent));
-  box-shadow: 0 14px 48px rgba(0, 0, 0, 0.08);
+  min-height: 68px;
+  margin: 0;
+  padding: 14px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .brand {
-  gap: 9px;
-  padding-left: 4px;
+  gap: 0;
+  padding-left: 0;
 }
 .brand::before {
   display: none;
@@ -876,7 +882,7 @@ ul, ol { margin: 0; padding-left: 20px; color: var(--body); }
 }
 .theme-toggle {
   border-color: transparent;
-  background: var(--surface-2);
+  background: transparent;
 }
 .secret-strip {
   display: grid;
@@ -926,33 +932,60 @@ ul, ol { margin: 0; padding-left: 20px; color: var(--body); }
 }
 @media (max-width: 760px) {
   .nav {
-    margin-top: 12px;
+    top: 0;
+    margin: 0;
     padding: 10px 0;
-    border-color: transparent;
+    border-bottom: 1px solid var(--line);
     border-radius: 0;
-    background: transparent;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(14px);
     box-shadow: none;
+    overflow: visible;
   }
   .nav.open {
-    padding: 10px 0 0;
+    padding: 10px 0;
     border-radius: 0;
-    background: transparent;
-    border-color: transparent;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    border-color: var(--line);
     box-shadow: none;
   }
+  .nav-links,
   .nav.open .nav-links {
-    margin-top: 14px;
-    padding: 12px 0 0;
-    border-top: 1px solid var(--line);
-    background: transparent;
+    position: absolute;
+    top: calc(100% + 1px);
+    left: 0;
+    right: 0;
+    z-index: 40;
+    display: grid;
+    gap: 4px;
+    width: 100%;
+    max-height: none;
+    margin: 0;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-top: 0;
+    border-radius: 0 0 14px 14px;
+    background: var(--surface);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.16);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-8px);
+    transition: opacity 160ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1), visibility 160ms ease;
+  }
+  .nav.open .nav-links {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
   }
   .nav.open .nav-links .button,
   .nav.open .nav-links > a:not(.button) {
-    justify-content: flex-start;
+    justify-content: center;
     height: 44px;
     min-height: 44px;
     padding: 0 10px;
-    border-radius: 12px;
+    border-radius: 9px;
     border: 0;
     border-bottom: 0;
     background: transparent;
@@ -968,6 +1001,7 @@ ul, ol { margin: 0; padding-left: 20px; color: var(--body); }
   background: transparent;
 }
 @media (max-width: 760px) {
+  .nav { row-gap: 0; }
   .brand {
     padding-left: 0;
     font-size: 14px;
@@ -981,9 +1015,30 @@ ul, ol { margin: 0; padding-left: 20px; color: var(--body); }
     height: 38px;
     background: transparent;
   }
-  .nav.open .nav-links {
-    gap: 8px;
+  .nav .nav-links {
+    position: static !important;
+    inset: auto !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
   }
+  .nav.open .nav-links {
+    position: static !important;
+    inset: auto !important;
+    max-height: 320px !important;
+    margin: 8px 0 0 !important;
+    padding: 8px 0 0 !important;
+    gap: 4px;
+    overflow: visible;
+    background: var(--bg);
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .nav.open { overflow: visible; }
   .nav.open .nav-menu {
     background: transparent;
   }
@@ -1003,7 +1058,7 @@ ul, ol { margin: 0; padding-left: 20px; color: var(--body); }
     text-align: center;
   }
   .landing-page .hero {
-    padding-top: 64px;
+    padding-top: 48px;
   }
 }
 </style>`;
@@ -1029,7 +1084,7 @@ ${sharedCss()}
     justify-items: center;
     text-align: center;
     gap: 14px;
-    padding: clamp(56px, 11vw, 104px) 0 clamp(44px, 8vw, 72px);
+    padding: clamp(52px, 8vw, 80px) 0 clamp(40px, 6vw, 60px);
   }
   .eyebrow {
     display: inline-flex;
@@ -1077,14 +1132,27 @@ ${sharedCss()}
     margin-top: 26px;
     display: grid;
     grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.05fr);
-    gap: 16px;
-    padding: clamp(20px, 3vw, 32px);
+    gap: clamp(28px, 5vw, 72px);
+    padding: 30px 0;
     align-items: stretch;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
   .flow-copy {
     display: grid;
     align-content: start;
     gap: 12px;
+  }
+  .flow-copy .section-label {
+    width: max-content;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
   }
   .flow-copy h2 {
     max-width: 520px;
@@ -1097,18 +1165,20 @@ ${sharedCss()}
   }
   .flow-steps {
     display: grid;
-    gap: 10px;
+    gap: 0;
   }
   .flow-card {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     gap: 14px;
     align-items: start;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    padding: 16px;
-    background: var(--surface);
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    padding: 18px 0;
+    background: transparent;
   }
+  .flow-card:last-child { border-bottom: 1px solid var(--line); }
   .flow-number {
     display: grid;
     place-items: center;
@@ -1284,21 +1354,23 @@ ${sharedCss()}
     color: var(--muted);
   }
   .section {
-    padding: 14px 0 64px;
+    padding: 10px 0 56px;
   }
   .steps {
     display: grid;
-    gap: 12px;
+    gap: 0;
     margin-top: 16px;
+    border-top: 1px solid var(--line);
   }
   .step {
     display: grid;
     grid-template-columns: 42px minmax(0, 1fr);
     gap: 16px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    padding: 18px;
-    background: var(--surface);
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    padding: 24px 0;
+    background: transparent;
   }
   .step h2 {
     margin: 0;
@@ -1311,6 +1383,12 @@ ${sharedCss()}
   }
   .step .code {
     margin-top: 10px;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: pre;
+    overflow-wrap: normal;
+    word-break: normal;
   }
   .copy-wrap { position: relative; }
   .copy-wrap .code { padding-right: 60px; }
@@ -1368,19 +1446,16 @@ ${sharedCss()}
     font-weight: 600;
   }
   @media (max-width: 760px) {
-    .setup-page .nav-links {
-      border-top: 1px solid var(--line);
-    }
     .hero {
-      padding: 40px 0 18px;
+      padding: 34px 0 18px;
     }
     .step {
-      grid-template-columns: 1fr;
-      gap: 8px;
-      padding: 16px;
+      grid-template-columns: 26px minmax(0, 1fr);
+      gap: 10px;
+      padding: 18px 0;
     }
     .copy-wrap .code {
-      padding: 46px 14px 14px;
+      padding: 42px 12px 12px;
     }
     .copy-button {
       top: 10px;
@@ -1470,17 +1545,6 @@ supermemory local --port 6767</pre>
         </article>
         <article class="step">
           <span class="step-number">5</span>
-          <div>
-            <h2>Confirm the environment</h2>
-            <p>Your MCP server must receive these values. If Supermemory prints a local API key, add <code>SUPERMEMORY_API_KEY</code>; local unauthenticated requests may work without it.</p>
-            <pre class="code">ERRORATLAS_API_URL=${origin}
-ERRORATLAS_API_KEY=ea_live_from_dashboard
-SUPERMEMORY_URL=http://localhost:6767
-SUPERMEMORY_API_KEY=optional_local_supermemory_key</pre>
-          </div>
-        </article>
-        <article class="step">
-          <span class="step-number">6</span>
           <div>
             <h2>Verify with your agent</h2>
             <p>Ask the agent to search before fixing, capture meaningful failures, and publish a playbook only after the fix is verified.</p>
@@ -1597,12 +1661,19 @@ ${sharedCss()}
   }
   .panel p { color: var(--body); }
   .auth-open-card {
-    min-height: 164px;
+    min-height: 240px;
+    max-width: 680px;
     display: grid;
     align-content: center;
     justify-items: start;
-    gap: 10px;
+    gap: 12px;
+    padding: 28px 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
+  .auth-open-card h2 { font-size: clamp(30px, 5vw, 48px); max-width: 620px; }
+  .auth-open-card p { max-width: 560px; }
   .auth-modal {
     position: fixed;
     inset: 0;
@@ -1612,6 +1683,7 @@ ${sharedCss()}
     padding: 20px;
     background: color-mix(in srgb, var(--gray-1000) 15%, transparent);
     backdrop-filter: blur(8px);
+    overscroll-behavior: contain;
   }
   .auth-modal[hidden] { display: none; }
   .auth-dialog {
@@ -1831,6 +1903,16 @@ ${sharedCss()}
     font-size: 13px;
     color: var(--fg);
   }
+  .secret-fallback {
+    width: 100%;
+    min-height: 40px;
+    padding: 10px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--fg);
+    font: 12px/1.4 var(--font-mono);
+  }
   .env-table {
     display: grid;
     border-top: 1px solid var(--line);
@@ -1913,7 +1995,7 @@ ${sharedCss()}
         <div class="auth-actions" id="topActions"></div>
       </header>
       <div class="content">
-        <div id="message"></div>
+        <div id="message" aria-live="polite"></div>
         <div id="appContent" class="view-space">
           <div class="panel loader-card">
             <div>
@@ -1931,6 +2013,8 @@ ${sharedCss()}
 <script>
 (function () {
   const sessionKey = "erroratlas.session";
+  const authStateKey = "erroratlas.auth-state";
+  let authTrigger = null;
   const state = {
     config: null,
     session: null,
@@ -1982,7 +2066,7 @@ ${sharedCss()}
 
   function readSession() {
     try {
-      const raw = localStorage.getItem(sessionKey);
+      const raw = sessionStorage.getItem(sessionKey);
       return raw ? JSON.parse(raw) : null;
     } catch (_error) {
       return null;
@@ -1991,8 +2075,8 @@ ${sharedCss()}
 
   function saveSession(session) {
     try {
-      if (session && session.access_token) localStorage.setItem(sessionKey, JSON.stringify(session));
-      else localStorage.removeItem(sessionKey);
+      if (session && session.access_token) sessionStorage.setItem(sessionKey, JSON.stringify(session));
+      else sessionStorage.removeItem(sessionKey);
     } catch (_error) {}
   }
 
@@ -2001,6 +2085,16 @@ ${sharedCss()}
     const token = hash.get("access_token");
     if (!token) return null;
 
+    const receivedState = new URL(location.href).searchParams.get("auth_state") || "";
+    let expectedState = "";
+    try { expectedState = localStorage.getItem(authStateKey) || ""; } catch (_error) {}
+    history.replaceState(null, "", location.pathname);
+    try { localStorage.removeItem(authStateKey); } catch (_error) {}
+    if (!expectedState || receivedState !== expectedState) {
+      setMessage("This sign-in link was not started in this browser. Start sign-in again.");
+      return null;
+    }
+
     const expiresIn = Number(hash.get("expires_in") || "3600");
     const session = {
       access_token: token,
@@ -2008,7 +2102,6 @@ ${sharedCss()}
       expires_at: Math.floor(Date.now() / 1000) + expiresIn
     };
 
-    history.replaceState(null, "", location.pathname);
     saveSession(session);
     return session;
   }
@@ -2107,9 +2200,6 @@ ${sharedCss()}
 
   function renderGeneratedEnv(hasKey) {
     return envRow("ERRORATLAS_API_URL", location.origin, false, false)
-      + (state.generatedKey && state.generatedKey.key
-        ? '<div class="env-row secret-row"><div><div class="env-name">ERRORATLAS_API_KEY</div><div class="env-value is-secret">copied_from_secret_button</div></div></div>'
-        : '<div class="env-row secret-row"><div><div class="env-name">ERRORATLAS_API_KEY</div><div class="env-value is-secret">' + (hasKey ? 'rotate_to_copy_new_secret' : 'generate_secret_first') + '</div></div></div>')
       + envRow("SUPERMEMORY_URL", "http://localhost:6767", false, false);
   }
 
@@ -2118,13 +2208,13 @@ ${sharedCss()}
       return '<div class="key-status"><div class="status-line"><div class="status-label">Status</div><div class="status-value">No key generated</div></div><div class="status-line"><div class="status-label">Secret</div><div class="status-value">Ready after generation</div></div></div>';
     }
     const key = keys[0];
-    const created = key.created_at ? new Date(key.created_at).toLocaleDateString() : "unknown date";
+    const created = key.created_at ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(key.created_at)) : "Unknown date";
     return '<div class="key-status"><div class="status-line"><div class="status-label">Status</div><div class="status-value">Active</div></div><div class="status-line"><div class="status-label">Created</div><div class="status-value">' + esc(created) + '</div></div><div class="status-line"><div class="status-label">Secret</div><div class="status-value">Hidden after creation</div></div></div>';
   }
 
   function renderSecretStrip(hasKey) {
     if (state.generatedKey && state.generatedKey.key) {
-      return '<div class="secret-strip is-ready"><div><strong>Secret generated</strong><span>Copy it now. The raw key is held only in this browser session.</span></div><div class="secret-copy-row"><span class="secret-token">ea_live_[hidden]</span><button class="button primary" type="button" data-copy-secret="api-key">Copy secret</button></div></div>';
+      return '<div class="secret-strip is-ready"><div><strong>ERRORATLAS_API_KEY is ready</strong><span>Copy it now. The raw key is held only in this browser session.</span></div><div class="secret-copy-row"><span class="secret-token">ea_live_[hidden]</span><button class="button primary" type="button" data-copy-secret="api-key">Copy secret</button></div></div>';
     }
 
     if (hasKey) {
@@ -2132,6 +2222,24 @@ ${sharedCss()}
     }
 
     return '<div class="secret-strip"><div><strong>No secret yet</strong><span>Generate your first MCP secret. The copy button appears immediately after generation.</span></div></div>';
+  }
+
+  function selectSecretFallback(secret, target) {
+    let fallback = document.getElementById("secretFallback");
+    if (!(fallback instanceof HTMLInputElement)) {
+      fallback = document.createElement("input");
+      fallback.id = "secretFallback";
+      fallback.className = "secret-fallback";
+      fallback.type = "text";
+      fallback.readOnly = true;
+      fallback.autocomplete = "off";
+      fallback.setAttribute("aria-label", "One-time ErrorAtlas API key");
+      const container = target.closest(".secret-strip") || target.parentElement;
+      if (container) container.appendChild(fallback);
+    }
+    fallback.value = secret;
+    fallback.focus();
+    fallback.select();
   }
 
   function renderDashboard() {
@@ -2160,7 +2268,7 @@ ${sharedCss()}
   function renderAuth() {
     title.textContent = "Sign in";
     status.textContent = "Protected console";
-    content.innerHTML = '<div class="panel auth-open-card"><span class="muted">Sign in to mint MCP keys</span><h3>Console access</h3><p>Use GitHub or a one-time email link. Your workspace is prepared automatically.</p></div><div class="auth-modal" id="authModal" hidden><div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authTitle"><div class="auth-dialog-head"><div><h3 id="authTitle">Enter ErrorAtlas</h3><p>Choose how you want to sign in.</p></div><button class="icon-button" id="closeAuthModal" type="button" aria-label="Close sign in dialog">x</button></div><div class="auth-methods"><button class="button primary" id="githubSignIn" type="button">Continue with GitHub</button><div class="auth-divider">or</div><input id="authEmail" type="email" placeholder="you@example.com" aria-label="Email address"><button class="button" id="sendEmail" type="button">Send magic link</button></div></div></div>';
+    content.innerHTML = '<section class="auth-open-card"><span class="muted">One key. Every debugging session.</span><h2>Connect your coding agent.</h2><p>Sign in from the header, generate one MCP secret, and paste it into your agent configuration.</p></section><div class="auth-modal" id="authModal" hidden><div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authTitle"><div class="auth-dialog-head"><div><h3 id="authTitle">Sign in to ErrorAtlas</h3><p>Choose GitHub or receive a one-time email link.</p></div><button class="icon-button" id="closeAuthModal" type="button" aria-label="Close sign in dialog">x</button></div><div class="auth-methods"><button class="button primary" id="githubSignIn" type="button">Continue with GitHub</button><div class="auth-divider">or</div><label class="sr-only" for="authEmail">Email address</label><input id="authEmail" name="email" type="email" autocomplete="email" spellcheck="false" placeholder="you@example.com…"><button class="button" id="sendEmail" type="button">Send magic link</button></div></div></div>';
   }
 
   function renderSetupMissing() {
@@ -2172,19 +2280,19 @@ ${sharedCss()}
 
   async function signInWithGitHub() {
     if (!state.config || !state.config.supabaseUrl) return setMessage("Sign-in is not configured yet.");
-    const redirectTo = location.origin + "/dashboard";
+    const redirectTo = authRedirectUrl();
     location.assign(supabaseBase() + "/auth/v1/authorize?provider=github&redirect_to=" + encodeURIComponent(redirectTo));
   }
 
   async function sendMagicLink(email) {
     if (!email) return setMessage("Enter an email address first.");
-    const redirectTo = location.origin + "/dashboard";
+    const redirectTo = authRedirectUrl();
     const response = await fetch(supabaseBase() + "/auth/v1/otp?redirect_to=" + encodeURIComponent(redirectTo), {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ email: email, create_user: true })
     });
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) throw new Error("Magic link could not be sent. Check the address and try again.");
     closeAuthModal();
     setMessage("Magic link sent. Check your inbox for " + email + ".", "success");
   }
@@ -2192,6 +2300,7 @@ ${sharedCss()}
   function openAuthModal() {
     const modal = document.getElementById("authModal");
     if (!modal) return;
+    authTrigger = document.activeElement;
     modal.hidden = false;
     const input = document.getElementById("authEmail");
     if (input && input.focus) input.focus();
@@ -2200,45 +2309,62 @@ ${sharedCss()}
   function closeAuthModal() {
     const modal = document.getElementById("authModal");
     if (modal) modal.hidden = true;
+    if (authTrigger && authTrigger.focus) authTrigger.focus();
+  }
+
+  function authRedirectUrl() {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    const authState = Array.from(bytes, function (byte) { return byte.toString(16).padStart(2, "0"); }).join("");
+    try { localStorage.setItem(authStateKey, authState); } catch (_error) {}
+    return location.origin + "/dashboard?auth_state=" + encodeURIComponent(authState);
+  }
+
+  async function signOut() {
+    const token = state.session && state.session.access_token ? state.session.access_token : "";
+    if (token) {
+      try {
+        await fetch(supabaseBase() + "/auth/v1/logout", {
+          method: "POST",
+          headers: authHeaders(token)
+        });
+      } catch (_error) {}
+    }
+    saveSession(null);
+    state.session = null;
+    state.data = null;
+    state.generatedKey = null;
   }
 
   async function createKey(button) {
+    const rotating = !!(state.data && state.data.agentKeys && state.data.agentKeys.length);
+    if (rotating && !confirm("Rotate the active secret? The old secret stops working immediately.")) return;
     button.disabled = true;
-    button.textContent = "Working";
+    button.textContent = rotating ? "Rotating…" : "Generating…";
     try {
-      const result = await api("/api/agent-keys", { method: "POST", body: JSON.stringify({}) });
+      const current = rotating ? state.data.agentKeys[0] : null;
+      const path = current && current.id ? "/api/agent-keys/" + encodeURIComponent(current.id) + "/rotate" : "/api/agent-keys";
+      const result = await api(path, { method: "POST", body: JSON.stringify({}) });
       const key = result && result.key ? result.key : "";
       if (!key) throw new Error("API did not return the raw key.");
       state.generatedKey = { key };
       state.message = "";
-      await loadDashboard();
+      state.data = Object.assign({}, state.data || {}, {
+        agentKeys: [{ id: result.id, created_at: new Date().toISOString() }]
+      });
       render();
       renderTopBar();
+      try {
+        await loadDashboard();
+        render();
+      } catch (_error) {
+        setMessage("Secret generated. Copy it now; key inventory refresh is temporarily unavailable.", "success");
+      }
     } catch (error) {
       setMessage("Agent key creation failed: " + (error instanceof Error ? error.message : "Unknown error."));
     } finally {
       button.disabled = false;
       button.textContent = state.data && state.data.agentKeys && state.data.agentKeys.length ? "Rotate secret" : "Generate secret";
-    }
-  }
-
-  async function rotateKey(id, button) {
-    if (!confirm("Rotate this key? The old secret stops working immediately.")) return;
-    button.disabled = true;
-    button.textContent = "Rotating";
-    try {
-      const result = await api("/api/agent-keys/" + encodeURIComponent(id) + "/rotate", { method: "POST" });
-      if (!result || !result.key) throw new Error("API did not return the new raw key.");
-      state.generatedKey = { key: result.key };
-      state.message = "";
-      await loadDashboard();
-      render();
-      renderTopBar();
-    } catch (error) {
-      setMessage("Key rotation failed: " + (error instanceof Error ? error.message : "Unknown error."));
-    } finally {
-      button.disabled = false;
-      button.textContent = "Rotate secret";
     }
   }
 
@@ -2271,9 +2397,7 @@ ${sharedCss()}
     }
 
     if (target.id === "logout") {
-      saveSession(null);
-      state.session = null;
-      state.data = null;
+      await signOut();
       setMessage("Signed out.", "success");
       render();
       renderTopBar();
@@ -2293,7 +2417,8 @@ ${sharedCss()}
         target.textContent = "Copied";
         setTimeout(function () { target.textContent = idleLabel; }, 1400);
       } catch (_error) {
-        target.textContent = "Select";
+        selectSecretFallback(secret, target);
+        target.textContent = "Selected";
         setTimeout(function () { target.textContent = idleLabel; }, 1400);
       }
       return;
@@ -2319,18 +2444,22 @@ ${sharedCss()}
       return;
     }
 
-    const rotateId = target.getAttribute("data-rotate-key");
-    if (rotateId) {
-      await rotateKey(rotateId, target);
-      renderTopBar();
-      return;
-    }
   });
 
   document.addEventListener("keydown", async function (event) {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
     if (event.key === "Escape") closeAuthModal();
+    if (event.key === "Tab") {
+      const modal = document.getElementById("authModal");
+      if (modal && !modal.hidden) {
+        const controls = Array.from(modal.querySelectorAll("button, input"));
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    }
     if (event.key === "Enter" && target.id === "authEmail") {
       const input = document.getElementById("authEmail");
       const email = input && input.value ? input.value.trim() : "";
@@ -2342,8 +2471,8 @@ ${sharedCss()}
     try {
       await loadConfig();
     } catch (error) {
-      state.config = { missing: ["PUBLIC_SUPABASE_URL", "PUBLIC_SUPABASE_ANON_KEY"] };
-      setMessage(error instanceof Error ? error.message : "Unable to load config.");
+      state.config = { missing: ["workspace_configuration"] };
+      setMessage("ErrorAtlas configuration is temporarily unavailable.");
       render();
       renderTopBar();
       return;
@@ -2358,6 +2487,16 @@ ${sharedCss()}
 
     try {
       await loadUser();
+    } catch (_error) {
+      saveSession(null);
+      state.session = null;
+      setMessage("Your session expired. Sign in again.");
+      renderTopBar();
+      render();
+      return;
+    }
+
+    try {
       await loadDashboard();
       renderTopBar();
       render();
@@ -2389,7 +2528,6 @@ ErrorAtlas is a debugging memory layer for coding agents. Agents use the MCP ser
 - Agents use the local \`erroratlas\` MCP server.
 - Supermemory local stores private project memory on the developer machine.
 - ErrorAtlas remote stores sanitized searchable incidents, playbooks, audit events, hashed keys, and encrypted payload snapshots.
-- Developers do not clone the ErrorAtlas repo, create Supabase projects, deploy Workers, or manage service-owner infrastructure.
 
 ## Public Endpoints
 
@@ -2443,7 +2581,6 @@ Windows/WSL note: if the npm wrapper installs the binary under bash home but can
 
 - erroratlas.search_error
 - erroratlas.capture_error_signal
-- erroratlas.record_incident
 - erroratlas.publish_resolution
 - erroratlas.get_playbook
 

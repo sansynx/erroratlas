@@ -39,7 +39,7 @@ create table if not exists public.projects (
 create table if not exists public.agent_keys (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references public.organizations(id) on delete cascade,
-  project_id uuid references public.projects(id) on delete set null,
+  project_id uuid references public.projects(id) on delete cascade,
   created_by uuid,
   name text not null,
   secret_hash text not null unique,
@@ -200,6 +200,74 @@ create unique index if not exists idx_agent_keys_one_active_per_org on public.ag
 create index if not exists idx_audit_events_org_created on public.audit_events (org_id, created_at desc);
 create index if not exists idx_contribution_days_lookup on public.contribution_days (org_id, day);
 
+create or replace function public.replace_active_agent_key(
+  p_org_id uuid,
+  p_project_id uuid,
+  p_created_by uuid,
+  p_name text,
+  p_secret_hash text,
+  p_key_prefix text,
+  p_scopes text[],
+  p_rotated_from uuid default null
+)
+returns table(id uuid)
+language plpgsql
+set search_path = public
+as $$
+declare
+  new_key_id uuid;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_org_id::text, 0));
+
+  if p_rotated_from is null then
+    if exists (
+      select 1 from public.agent_keys
+      where org_id = p_org_id and revoked_at is null
+    ) then
+      raise exception using errcode = '23505', message = 'an active agent key already exists';
+    end if;
+  else
+    update public.agent_keys
+    set
+      revoked_at = now(),
+      revoked_by = p_created_by,
+      revoked_reason = 'rotated'
+    where id = p_rotated_from
+      and org_id = p_org_id
+      and revoked_at is null;
+
+    if not found then
+      raise exception using errcode = 'P0002', message = 'agent key is no longer active';
+    end if;
+  end if;
+
+  insert into public.agent_keys (
+    org_id,
+    project_id,
+    created_by,
+    name,
+    secret_hash,
+    key_prefix,
+    rotated_from,
+    scopes
+  ) values (
+    p_org_id,
+    p_project_id,
+    p_created_by,
+    p_name,
+    p_secret_hash,
+    p_key_prefix,
+    p_rotated_from,
+    p_scopes
+  ) returning agent_keys.id into new_key_id;
+
+  return query select new_key_id;
+end;
+$$;
+
+revoke all on function public.replace_active_agent_key(uuid, uuid, uuid, text, text, text, text[], uuid) from public;
+grant execute on function public.replace_active_agent_key(uuid, uuid, uuid, text, text, text, text[], uuid) to service_role;
+
 alter table public.incidents add column if not exists signal_type text not null default 'error';
 alter table public.incidents add column if not exists command text;
 alter table public.incidents add column if not exists exit_code integer;
@@ -213,6 +281,85 @@ alter table public.user_profiles add column if not exists updated_at timestamptz
 alter table public.agent_keys add column if not exists rotated_from uuid references public.agent_keys(id) on delete set null;
 alter table public.agent_keys add column if not exists revoked_by uuid;
 alter table public.agent_keys add column if not exists revoked_reason text;
+
+update public.agent_keys as agent_key
+set
+  revoked_at = coalesce(agent_key.revoked_at, now()),
+  revoked_reason = coalesce(agent_key.revoked_reason, 'invalid_project_scope_cleanup')
+where agent_key.project_id is not null
+  and not exists (
+    select 1
+    from public.projects as project
+    where project.id = agent_key.project_id
+      and project.org_id = agent_key.org_id
+  );
+
+update public.incidents as incident
+set project_id = null
+where incident.project_id is not null
+  and not exists (
+    select 1 from public.projects as project
+    where project.id = incident.project_id and project.org_id = incident.org_id
+  );
+
+update public.playbook_submissions as submission
+set project_id = null
+where submission.project_id is not null
+  and not exists (
+    select 1 from public.projects as project
+    where project.id = submission.project_id and project.org_id = submission.org_id
+  );
+
+update public.playbooks as playbook
+set project_id = null
+where playbook.project_id is not null
+  and not exists (
+    select 1 from public.projects as project
+    where project.id = playbook.project_id and project.org_id = playbook.org_id
+  );
+
+alter table public.agent_keys drop constraint if exists agent_keys_project_id_fkey;
+alter table public.agent_keys
+  add constraint agent_keys_project_id_fkey
+  foreign key (project_id) references public.projects(id) on delete cascade;
+
+create or replace function public.enforce_project_organization()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.project_id is not null and not exists (
+    select 1 from public.projects
+    where id = new.project_id and org_id = new.org_id
+  ) then
+    raise exception using
+      errcode = '23514',
+      message = 'project must belong to organization';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists agent_keys_project_organization on public.agent_keys;
+create trigger agent_keys_project_organization
+before insert or update of project_id, org_id on public.agent_keys
+for each row execute function public.enforce_project_organization();
+
+drop trigger if exists incidents_project_organization on public.incidents;
+create trigger incidents_project_organization
+before insert or update of project_id, org_id on public.incidents
+for each row execute function public.enforce_project_organization();
+
+drop trigger if exists submissions_project_organization on public.playbook_submissions;
+create trigger submissions_project_organization
+before insert or update of project_id, org_id on public.playbook_submissions
+for each row execute function public.enforce_project_organization();
+
+drop trigger if exists playbooks_project_organization on public.playbooks;
+create trigger playbooks_project_organization
+before insert or update of project_id, org_id on public.playbooks
+for each row execute function public.enforce_project_organization();
 
 alter table public.organizations enable row level security;
 alter table public.organization_members enable row level security;

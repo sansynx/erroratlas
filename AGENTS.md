@@ -17,7 +17,7 @@ End users should not clone this repo, configure Supabase, deploy Cloudflare Work
 - `supabase/schema.sql` is the service-owner database source of truth.
 - `templates` contains files copied into user projects by `npx erroratlas init`.
 - `public` contains Worker-served assets.
-- `scripts/sync-assets.mjs` bundles public assets for Worker routes.
+- `wrangler.jsonc` serves `public` through the Worker's static-assets binding.
 
 ## Hard rules
 
@@ -71,8 +71,7 @@ When changing database shape:
 When changing public assets:
 
 - Place files in `public`.
-- Update `scripts/sync-assets.mjs` if a new asset must be served by the Worker.
-- Run `npm run sync:assets` before expecting Worker asset routes to serve new content.
+- Keep the `ASSETS` binding in `wrangler.jsonc` and regenerate Worker types after binding changes.
 
 ## Agent workflow
 
@@ -81,7 +80,6 @@ The MCP server should expose the core flow:
 ```txt
 erroratlas.search_error
 erroratlas.capture_error_signal
-erroratlas.record_incident
 erroratlas.publish_resolution
 erroratlas.get_playbook
 ```
@@ -93,10 +91,9 @@ Before fixing a non-trivial error, agents should search ErrorAtlas. After a veri
 Useful maintainer commands:
 
 ```bash
-npm run sync:assets
 npm run build
 npm run dev
-npm run test:e2e
+npm run cf-types
 ```
 
 Run validation before release or when explicitly asked.
