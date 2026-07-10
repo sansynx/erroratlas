@@ -1,6 +1,6 @@
 {
   "name": "@sansynx/erroratlas",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "description": "Hosted ErrorAtlas MCP client and local debugging memory tools for coding agents.",
